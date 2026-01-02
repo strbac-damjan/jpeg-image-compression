@@ -1,3 +1,6 @@
+#ifndef BMP_HANDLER_H
+#define BMP_HANDLER_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -42,3 +45,4 @@ void freeBMPImage(BMPImage* image);
 BMPImage* loadBMPImage(const char* filename);
 
 bool saveBMPImage(const char* filename, const BMPImage* image);
+#endif
