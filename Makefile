@@ -5,7 +5,7 @@ CFLAGS = -Iinclude -Wall -Wextra -g
 
 # --- Configuration ---
 # Source directories
-SRC_DIRS = src src/io
+SRC_DIRS = src src/io src/core
 # Output directory
 BUILD_DIR = build
 # Executable name

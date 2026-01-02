@@ -14,6 +14,9 @@ Here is an overview of the repository organization and the purpose of each direc
 ├── build/               # Compiled object files (.o) and the final executable
 ├── include/             # Header files (.h) defining interfaces and constants
 ├── src/                 # Source code (.c)
+│   ├── core/            # Core project functionality
+│   ├── io/              # I/O implementation for file formats
+│   └── main.c           # Entry point of the application
 ├── LICENSE              # Project license information
 ├── Makefile             # Build configuration and automation
 └── README.md            # Project documentation

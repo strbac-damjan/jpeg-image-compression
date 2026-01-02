@@ -1,51 +1,7 @@
 #include "jpeg_handler.h"
 #include "jpeg_tables.h"
 
-
-YImage* convertBMPToJPEGGrayscale(const BMPImage* image) {
-    
-    if (image == NULL || image->data == NULL) {
-        return NULL;
-    }
-
-    YImage* yImg = (YImage*)malloc(sizeof(YImage));
-    if (yImg == NULL) {
-        return NULL; // Greška pri alokaciji
-    }
-
-    yImg->width = image->width;
-    yImg->height = image->height;
-    
-    int totalPixels = image->width * image->height;
-    yImg->data = (unsigned char*)malloc(totalPixels * sizeof(unsigned char));
-
-    if (yImg->data == NULL) {
-        free(yImg);
-        return NULL;
-    }
-
-    for (int i = 0; i < totalPixels; i++) {
-        int rgbIndex = i * 3;
-
-        uint8_t r = image->data[rgbIndex];     
-        uint8_t g = image->data[rgbIndex + 1];
-        uint8_t b = image->data[rgbIndex + 2];
-
-        // Original:
-        // Y = 0.299*R + 0.587*G + 0.114*B
-        // Optimized whole number approximation(multiplied by 256):
-        // Y = (77*R + 150*G + 29*B) >> 8
-        
-        uint32_t yVal = (77 * r + 150 * g + 29 * b) >> 8;
-
-        yImg->data[i] = (uint8_t) yVal;
-    }
-
-    return yImg;
-}
-
-
-// 1. Write APP0 (JFIF Header)
+// Write APP0 (JFIF Header)
 bool write_app0(FILE *file) {
     JPEG_Header_APP0 app0;
     memset(&app0, 0, sizeof(app0));
@@ -134,4 +90,42 @@ bool write_sos(FILE *file) {
 bool write_eoi(FILE *file) {
     unsigned short eoi = SWAP16(0xFFD9);
     return fwrite(&eoi, sizeof(eoi), 1, file) == 1;
+}
+
+bool saveJPEGGrayscale(const char* filename, YImage img) {
+    FILE *file = fopen(filename, "wb");
+    if (!file) {
+        perror("Failed to open file");
+        return false;
+    }
+
+    bool ok = true;
+
+    // Write all headers in order
+    ok &= write_app0(file);
+    ok &= write_dqt(file);
+    ok &= write_sof0(file, img.width, img.height);
+    ok &= write_dht_dc(file);
+    ok &= write_dht_ac(file);
+    ok &= write_sos(file);
+
+    if (!ok) {
+        printf("Error writing JPEG headers.\n");
+        fclose(file);
+        return false;
+    }
+
+    // --- BITSTREAM GENERATION WOULD GO HERE ---
+    // 1. Process img.data in 8x8 blocks
+    // 2. DCT -> Quantize -> ZigZag -> Huffman
+    // 3. Write bits to 'file'
+    // ------------------------------------------
+    
+    // For now, we write nothing in the body, which creates an empty (invalid) image structure.
+    
+    // Write End of Image
+    write_eoi(file);
+
+    fclose(file);
+    return true;
 }

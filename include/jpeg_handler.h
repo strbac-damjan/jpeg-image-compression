@@ -103,7 +103,6 @@ typedef struct {
 #pragma pack(pop)
 
 
-YImage* convertBMPToJPEGGrayscale(const BMPImage* image);
 bool write_app0(FILE *file);
 bool write_dqt(FILE *file);
 bool write_sof0(FILE *file, int width, int height);
@@ -111,4 +110,5 @@ bool write_dht_dc(FILE *file);
 bool write_dht_ac(FILE *file);
 bool write_sos(FILE *file);
 bool write_eoi(FILE *file);
+bool saveJPEGGrayscale(const char* filename, YImage img);
 #endif
