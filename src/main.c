@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include "converter.h"
-#include "zigzag.h"
+#include "rle.h"
 
 int main(int argc, char *argv[]) {
     // Check if sufficient arguments are provided
@@ -30,10 +30,13 @@ int main(int argc, char *argv[]) {
         DCTImage* dctImage = performDCT(centeredYImage);
         QuantizedImage* quantizedImage = quantizeImage(dctImage);
         ZigZagData* zzd = performZigZag(quantizedImage);
+        RLEData* rld = performRLE(zzd);
 
-        for(int i = 0; i < dctImage->height * dctImage->width; i++) {
-             printf("%d ", zzd->data[i]);
+        for(int i = 0; i < rld->count; i++) {
+            printf("(%d, %d, %d) ", rld->data[i].symbol, rld->data[i].code, rld->data[i].codeBits);
         }
+        printf("\nNume elems: %d\n", rld->count);
+        printf("Original num elems: %d", yImage->height * yImage->width);
         
         
         freeBMPImage(img);
@@ -42,6 +45,7 @@ int main(int argc, char *argv[]) {
         freeDCTImage(dctImage);
         freeQuantizedImage(quantizedImage);
         freeZigZagData(zzd);
+        freeRLEData(rld);
     } else {
         fprintf(stderr, "Error: Failed to load image from %s\n", inputPath);
         return 1;

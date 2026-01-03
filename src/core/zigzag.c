@@ -27,13 +27,10 @@ ZigZagData *performZigZag(const QuantizedImage *qImg)
     if (zzData == NULL)
         return NULL;
 
-    // Računamo koliko imamo 8x8 blokova
-    // Pretpostavljamo da su dimenzije deljive sa 8 (standard za ovaj korak)
     zzData->numBlocksW = qImg->width / 8;
     zzData->numBlocksH = qImg->height / 8;
     zzData->totalBlocks = zzData->numBlocksW * zzData->numBlocksH;
 
-    // Alociramo memoriju: 64 koeficijenta (int16) po bloku
     int totalCoeffs = zzData->totalBlocks * 64;
     zzData->data = (int16_t *)malloc(totalCoeffs * sizeof(int16_t));
 
@@ -45,30 +42,20 @@ ZigZagData *performZigZag(const QuantizedImage *qImg)
 
     int blockIndex = 0;
 
-    // Iteriramo kroz blokove slike (Raster Scan order of blocks)
     for (int blockY = 0; blockY < qImg->height; blockY += 8)
     {
         for (int blockX = 0; blockX < qImg->width; blockX += 8)
         {
 
-            // Za svaki blok, popunjavamo 64 vrednosti u ZigZag nizu
             for (int i = 0; i < 64; i++)
             {
 
-                // 1. Gde smo u ZigZag putanji unutar bloka? (0-63)
                 int zigZagPos = ZIGZAG_ORDER[i];
+                int localRow = zigZagPos / 8; 
+                int localCol = zigZagPos % 8; 
 
-                // 2. Mapiramo tu poziciju na 2D koordinate unutar bloka (0-7)
-                int localRow = zigZagPos / 8; // Integer deljenje (red)
-                int localCol = zigZagPos % 8; // Ostatak (kolona)
-
-                // 3. Nalazimo pravi indeks u velikom nizu originalne slike
-                // GlobalRow = blockY + localRow
-                // GlobalCol = blockX + localCol
                 int imageIndex = (blockY + localRow) * qImg->width + (blockX + localCol);
 
-                // 4. Upisujemo u izlazni niz
-                // Izlazni niz je organizovan blok po blok
                 zzData->data[blockIndex * 64 + i] = qImg->data[imageIndex];
             }
 
