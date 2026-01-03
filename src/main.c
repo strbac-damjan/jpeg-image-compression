@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "converter.h"
+#include "dct.h"
 
 int main(int argc, char *argv[]) {
     // Check if sufficient arguments are provided
@@ -25,11 +26,14 @@ int main(int argc, char *argv[]) {
         
         YImage* yImage = convertBMPToJPEGGrayscale(img);
         CenteredYImage* centeredYImage = centerYImage(yImage);
+        //initDCTTables();
+        DCTImage* dctImage = performDCT(centeredYImage);
 
-        for(int i = 0; i < centeredYImage->height * centeredYImage->width; i++)
-        {
-            printf("%d\n", centeredYImage->data[i]);
+        for(int i = 0; i < dctImage->height * dctImage->width; i++) {
+            printf("%f", dctImage->coefficients[i]);
         }
+        
+
         
         freeBMPImage(img);
         freeYImage(yImage);
