@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include "converter.h"
-#include "dct.h"
-#include "quantization.h"
+#include "zigzag.h"
 
 int main(int argc, char *argv[]) {
     // Check if sufficient arguments are provided
@@ -30,9 +29,10 @@ int main(int argc, char *argv[]) {
         //initDCTTables();
         DCTImage* dctImage = performDCT(centeredYImage);
         QuantizedImage* quantizedImage = quantizeImage(dctImage);
+        ZigZagData* zzd = performZigZag(quantizedImage);
 
         for(int i = 0; i < dctImage->height * dctImage->width; i++) {
-             printf("%d ", quantizedImage->data[i]);
+             printf("%d ", zzd->data[i]);
         }
         
         
@@ -41,6 +41,7 @@ int main(int argc, char *argv[]) {
         freeCenteredYImage(centeredYImage);
         freeDCTImage(dctImage);
         freeQuantizedImage(quantizedImage);
+        freeZigZagData(zzd);
     } else {
         fprintf(stderr, "Error: Failed to load image from %s\n", inputPath);
         return 1;
