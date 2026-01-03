@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "converter.h"
 #include "dct.h"
-#include "quanitzation.h"
+#include "quantization.h"
 
 int main(int argc, char *argv[]) {
     // Check if sufficient arguments are provided

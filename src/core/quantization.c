@@ -1,4 +1,4 @@
-#include "quanitzation.h"
+#include "quantization.h"
 
 QuantizedImage* quantizeImage(const DCTImage* dctImg) {
     if (dctImg == NULL || dctImg->coefficients == NULL) return NULL;

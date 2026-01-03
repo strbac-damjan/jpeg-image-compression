@@ -1,5 +1,5 @@
-#ifndef QUANITZATION_H
-#define QUANITZATION_H
+#ifndef QUANTIZATION_H
+#define QUANTIZATION_H
 
 #include <stdlib.h>
 #include <math.h>
