@@ -24,12 +24,16 @@ int main(int argc, char *argv[]) {
         printf("Image loaded: %dx%d pixels\n", img->width, img->height);
         
         YImage* yImage = convertBMPToJPEGGrayscale(img);
-        for(int i = 0; i < yImage->height * yImage->width; i++) 
+        CenteredYImage* centeredYImage = centerYImage(yImage);
+
+        for(int i = 0; i < centeredYImage->height * centeredYImage->width; i++)
         {
-            printf("yImagePixel at index %d equals %d\n", i, yImage->data[i]);
+            printf("%d\n", centeredYImage->data[i]);
         }
         
-        freeBMPImage(img); // Important: Free memory!
+        freeBMPImage(img);
+        freeYImage(yImage);
+        freeCenteredYImage(centeredYImage);
     } else {
         fprintf(stderr, "Error: Failed to load image from %s\n", inputPath);
         return 1;

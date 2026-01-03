@@ -9,7 +9,7 @@ YImage* convertBMPToJPEGGrayscale(const BMPImage* image) {
 
     YImage* yImg = (YImage*)malloc(sizeof(YImage));
     if (yImg == NULL) {
-        return NULL; // Greška pri alokaciji
+        return NULL; 
     }
 
     yImg->width = image->width;
@@ -41,4 +41,48 @@ YImage* convertBMPToJPEGGrayscale(const BMPImage* image) {
     }
 
     return yImg;
+}
+
+CenteredYImage* centerYImage(const YImage* source) {
+    
+    if (source == NULL || source->data == NULL) {
+        return NULL;
+    }
+
+    CenteredYImage* centeredImg = (CenteredYImage*)malloc(sizeof(CenteredYImage));
+    if (centeredImg == NULL) {
+        return NULL;
+    }
+
+    centeredImg->width = source->width;
+    centeredImg->height = source->height;
+
+    int totalPixels = source->width * source->height;
+    centeredImg->data = (int8_t*)malloc(totalPixels * sizeof(int8_t));
+
+    if (centeredImg->data == NULL) {
+        free(centeredImg); // Cleanup struct allocation
+        return NULL;
+    }
+
+    // Perform Level Shifting
+    for (int i = 0; i < totalPixels; i++) {
+        int shiftedValue = (int)source->data[i] - 128;
+        
+        centeredImg->data[i] = (int8_t)shiftedValue;
+    }
+
+    return centeredImg;
+}
+
+void freeCenteredYImage(CenteredYImage *img)
+{
+    if(img) 
+    {
+        if(img->data)
+        {
+            free(img->data);
+        }
+        free(img);
+    }
 }

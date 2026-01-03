@@ -111,4 +111,7 @@ bool write_dht_ac(FILE *file);
 bool write_sos(FILE *file);
 bool write_eoi(FILE *file);
 bool saveJPEGGrayscale(const char* filename, YImage img);
+
+void freeYImage(YImage* img);
+
 #endif

@@ -129,3 +129,15 @@ bool saveJPEGGrayscale(const char* filename, YImage img) {
     fclose(file);
     return true;
 }
+
+void freeYImage(YImage *img)
+{
+    if(img) 
+    {
+        if(img->data)
+        {
+            free(img->data);
+        }
+        free(img);
+    }
+}
