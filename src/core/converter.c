@@ -1,6 +1,5 @@
 #include "converter.h"
 
-
 YImage* convertBMPToJPEGGrayscale(const BMPImage* image) {
     
     if (image == NULL || image->data == NULL) {

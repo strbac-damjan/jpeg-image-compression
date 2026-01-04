@@ -10,14 +10,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include "bmp_handler.h"
-
-// Internal image structure (does not necessarily need packing as it stays in memory)
-typedef struct {
-    int width;           // Image width
-    int height;          // Image height
-    uint8_t *data;       // Pointer to the pixel array (length = width * height)
-                         // Values 0-255 (where 0=black, 255=white)
-} YImage;
+#include "huffman.h"
+#include "converter.h"
 
 // Header indicating this is a standard JFIF JPEG
 #pragma pack(push, 1) // Disable padding bytes
@@ -110,7 +104,7 @@ bool write_dht_dc(FILE *file);
 bool write_dht_ac(FILE *file);
 bool write_sos(FILE *file);
 bool write_eoi(FILE *file);
-bool saveJPEGGrayscale(const char* filename, YImage img);
+bool saveJPEGGrayscale(const char* filename, const BMPImage* img);
 
 void freeYImage(YImage* img);
 

@@ -1,6 +1,5 @@
 #include <stdio.h>
-#include "converter.h"
-#include "rle.h"
+#include "jpeg_handler.h"
 
 int main(int argc, char *argv[]) {
     // Check if sufficient arguments are provided
@@ -22,30 +21,11 @@ int main(int argc, char *argv[]) {
     BMPImage* img = loadBMPImage(inputPath);
     
     if (img) {
-        printf("Image loaded: %dx%d pixels\n", img->width, img->height);
-        
-        YImage* yImage = convertBMPToJPEGGrayscale(img);
-        CenteredYImage* centeredYImage = centerYImage(yImage);
-        //initDCTTables();
-        DCTImage* dctImage = performDCT(centeredYImage);
-        QuantizedImage* quantizedImage = quantizeImage(dctImage);
-        ZigZagData* zzd = performZigZag(quantizedImage);
-        RLEData* rld = performRLE(zzd);
-
-        for(int i = 0; i < rld->count; i++) {
-            printf("(%d, %d, %d) ", rld->data[i].symbol, rld->data[i].code, rld->data[i].codeBits);
-        }
-        printf("\nNume elems: %d\n", rld->count);
-        printf("Original num elems: %d", yImage->height * yImage->width);
-        
-        
-        freeBMPImage(img);
-        freeYImage(yImage);
-        freeCenteredYImage(centeredYImage);
-        freeDCTImage(dctImage);
-        freeQuantizedImage(quantizedImage);
-        freeZigZagData(zzd);
-        freeRLEData(rld);
+       bool value = saveJPEGGrayscale("assets/output/lena.jpeg", img);
+       if(value) 
+       {
+        printf("Save is sucesfull");
+       }
     } else {
         fprintf(stderr, "Error: Failed to load image from %s\n", inputPath);
         return 1;
