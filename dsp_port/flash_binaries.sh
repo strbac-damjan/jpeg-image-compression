@@ -13,7 +13,8 @@ $HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/C66/FREE
 "
 
 APPS="
-$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/A72/LINUX/release/vx_app_single_cam.out"
+$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/A72/LINUX/release/jpeg_client_app.out
+$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/A72/LINUX/release/jpeg_client_app.out.map"
 
 # ===== Copy binaries =====
 echo "Copying RTOS binaries to target..."

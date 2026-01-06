@@ -43,9 +43,9 @@ export JPEG_REPO_PATH
 .
 .
 
-DIRECTORIES += apps/utilities
+DIRECTORIES :=
 DIRECTORIES += $(JPEG_REPO_PATH)
-DIRECTORIES += kernels/fileio
+DIRECTORIES += $(JPEG_REPO_PATH)/jpeg_client
 ```
 Here you should put your own path to the project folder as the JPEG_REPO_PATH
 
@@ -105,6 +105,10 @@ int32_t appInit()
 5. Update the `vision_apps/platform/j721e/rtos/concerto_c7x_inc.mak` to include:
 `STATIC_LIBS += app_utils_jpeg_compression`
 
-6. Go to  `ti-processor-sdk-rtos-j721e-evm-09_02_00_05/sdk_builder` and run make `vision_apps -j16`
+6. Go to  `ti-processor-sdk-rtos-j721e-evm-09_02_00_05/sdk_builder` and run `make vision_apps -j16`
 
 7. Connect to the board then run the `dsp_port/flash_binaries.sh` script to transfer the binaries to the board
+
+8. Run `ssh root@192.168.1.200` to connect to the board, then go to `/opt/vision_apps/`
+
+9. Run `./jpeg_client_app.out` to start the program.

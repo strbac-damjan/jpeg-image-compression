@@ -1,3 +1,4 @@
+$(warning [DEBUG] concerto.mak file in dsp_port/jpeg_compression/src/concerto.mak is found!)
 
 include $(PRELUDE)
 
