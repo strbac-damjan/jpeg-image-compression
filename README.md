@@ -105,9 +105,7 @@ int32_t appInit()
 5. Update the `vision_apps/platform/j721e/rtos/concerto_c7x_inc.mak` to include:
 `STATIC_LIBS += app_utils_jpeg_compression`
 
-6. Go to  `ti-processor-sdk-rtos-j721e-evm-09_02_00_05/sdk_builder` and run `make vision_apps -j16`
-
-7. Connect to the board then run the `dsp_port/flash_binaries.sh` script to transfer the binaries to the board
+7. Connect to the board then run the `dsp_port/full_build.sh` script to transfer the binaries to the board
 
 8. Run `ssh root@192.168.1.200` to connect to the board, then go to `/opt/vision_apps/`
 
