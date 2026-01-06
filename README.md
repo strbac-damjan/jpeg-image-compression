@@ -47,6 +47,8 @@ DIRECTORIES += apps/utilities
 DIRECTORIES += $(JPEG_REPO_PATH)
 DIRECTORIES += kernels/fileio
 ```
+Here you should put your own path to the project folder as the JPEG_REPO_PATH
+
 3. Update the file `vision_apps/platform/j721e/rtos/common/concerto.mak` to include:
 ```
 ifeq ($(BUILD_CPU_C7x_1),yes)
@@ -100,6 +102,6 @@ int32_t appInit()
 }
 ```
 
-5. Go to  `ti-processor-sdk-rtos-j721e-evm-09_02_00_05/sdk_builder` and run make vision_apps -j16
+5. Go to  `ti-processor-sdk-rtos-j721e-evm-09_02_00_05/sdk_builder` and run make `vision_apps -j16`
 
 6. Connect to the board then run the `dsp_port/flash_binaries.sh` script to transfer the binaries to the board

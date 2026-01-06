@@ -7,13 +7,13 @@ TARGET_DIR=/lib/firmware/vision_apps_evm
 APPS_TARGET_DIR=/opt/vision_apps
 
 BINARIES="
-/home/damjans/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/R5F/FREERTOS/release/*.out
-/home/damjans/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/C71/FREERTOS/release/*.out
-/home/damjans/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/C66/FREERTOS/release/*.out
+$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/R5F/FREERTOS/release/*.out
+$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/C71/FREERTOS/release/*.out
+$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/C66/FREERTOS/release/*.out
 "
 
 APPS="
-/home/damjans/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/A72/LINUX/release/vx_app_single_cam.out"
+$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05/vision_apps/out/J721E/A72/LINUX/release/vx_app_single_cam.out"
 
 # ===== Copy binaries =====
 echo "Copying RTOS binaries to target..."
