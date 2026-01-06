@@ -3,6 +3,8 @@ CC = gcc
 # CFLAGS: -Iinclude ensures the compiler finds bmp_handler.h
 CFLAGS = -Iinclude -Wall -Wextra -g
 
+LDFLAGS = -lm
+
 # --- Configuration ---
 # Source directories
 SRC_DIRS = src src/io src/core
@@ -28,7 +30,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	@echo "Linking executable..."
 	@mkdir -p $(dir $@)
-	$(CC) $(OBJS) -o $@
+	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 	@echo "Build successful! Executable created at: $@"
 
 # Compile
