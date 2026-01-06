@@ -12,6 +12,21 @@ typedef struct {
     size_t capacity;
 } JpegEncoderBuffer;
 
+// --- internal structures ---
+
+typedef struct {
+    uint16_t code; // The bit sequence (e.g., 1010)
+    uint8_t len;   // The length of the sequence (e.g., 4)
+} HuffmanCode;
+
+// --- BitWriter Helper ---
+
+typedef struct {
+    JpegEncoderBuffer* buffer;
+    uint32_t accumulator; // Temp storage for bits
+    int bitCount;         // How many bits are currently in accumulator
+} BitWriter;
+
 /**
  * Encodes the RLE data into a JPEG Huffman bitstream.
  * * @param rleData Input RLE symbols.

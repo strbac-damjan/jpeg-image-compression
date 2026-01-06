@@ -199,7 +199,7 @@ bool saveJPEGGrayscale(const char *filename, const BMPImage* img)
     ok &= write_dqt(file);
     
     // SOF0 (Start of Frame - dimensions)
-    ok &= write_sof0(file, yImage->width, yImage->height);
+    ok &= write_sof0(file, img->width, img->height);
     
     // DHT (Huffman Tables) - Must write both DC and AC tables
     ok &= write_dht_dc(file);

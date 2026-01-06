@@ -3,13 +3,6 @@
 #include <string.h>
 #include <stdio.h>
 
-// --- internal structures ---
-
-typedef struct {
-    uint16_t code; // The bit sequence (e.g., 1010)
-    uint8_t len;   // The length of the sequence (e.g., 4)
-} HuffmanCode;
-
 // Lookup tables: 
 // dcTable maps a category (0-11) to a code.
 // acTable maps a symbol (Run/Size byte) to a code.
@@ -17,13 +10,6 @@ static HuffmanCode dcTable[16];
 static HuffmanCode acTable[256];
 static int tablesInitialized = 0;
 
-// --- BitWriter Helper ---
-
-typedef struct {
-    JpegEncoderBuffer* buffer;
-    uint32_t accumulator; // Temp storage for bits
-    int bitCount;         // How many bits are currently in accumulator
-} BitWriter;
 
 // Grows the buffer if needed
 static void ensureCapacity(JpegEncoderBuffer* buf, size_t extra) {
@@ -154,7 +140,7 @@ JpegEncoderBuffer* encodeHuffman(const RLEData* rleData, int totalBlocks) {
         
         if (symbolIndex >= rleData->count) break;
 
-        // --- 1. Process DC Coefficient ---
+        // Process DC Coefficient
         // The first symbol of every block is ALWAYS DC
         RLESymbol dcSym = rleData->data[symbolIndex++];
         

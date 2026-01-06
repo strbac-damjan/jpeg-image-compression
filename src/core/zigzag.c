@@ -41,12 +41,13 @@ ZigZagData *performZigZag(const QuantizedImage *qImg)
     }
 
     int blockIndex = 0;
-
+    // Iterate through image block by block
     for (int blockY = 0; blockY < qImg->height; blockY += 8)
     {
         for (int blockX = 0; blockX < qImg->width; blockX += 8)
         {
 
+            // Iterate through block pixel by pixel
             for (int i = 0; i < 64; i++)
             {
 

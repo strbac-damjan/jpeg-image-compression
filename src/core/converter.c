@@ -1,5 +1,6 @@
 #include "converter.h"
 
+
 YImage* convertBMPToJPEGGrayscale(const BMPImage* image) {
     
     if (image == NULL || image->data == NULL) {
@@ -11,32 +12,46 @@ YImage* convertBMPToJPEGGrayscale(const BMPImage* image) {
         return NULL; 
     }
 
-    yImg->width = image->width;
-    yImg->height = image->height;
+    int paddedWidth = (image->width + 7) & (~7);
+    int paddedHeight = (image->height + 7) & (~7);
+
+    yImg->width = paddedWidth;
+    yImg->height = paddedHeight;
     
-    int totalPixels = image->width * image->height;
-    yImg->data = (unsigned char*)malloc(totalPixels * sizeof(unsigned char));
+    // Allocate memory for the PADDED size
+    yImg->data = (uint8_t*)malloc(paddedWidth * paddedHeight * sizeof(uint8_t));
 
     if (yImg->data == NULL) {
         free(yImg);
         return NULL;
     }
+    for (int y = 0; y < paddedHeight; y++) {
+        // Clamp the Y coordinate to the original image height.
+        // If y >= original height, we repeat the last row.
+        int srcY = MIN(y, image->height - 1);
 
-    for (int i = 0; i < totalPixels; i++) {
-        int rgbIndex = i * 3;
+        for (int x = 0; x < paddedWidth; x++) {
+            // Clamp the X coordinate to the original image width.
+            // If x >= original width, we repeat the last pixel of the row.
+            int srcX = MIN(x, image->width - 1);
 
-        uint8_t r = image->data[rgbIndex];     
-        uint8_t g = image->data[rgbIndex + 1];
-        uint8_t b = image->data[rgbIndex + 2];
+            // Calculate index in the source (RGB) buffer
+            int srcIndex = (srcY * image->width + srcX) * 3;
 
-        // Original:
-        // Y = 0.299*R + 0.587*G + 0.114*B
-        // Optimized whole number approximation(multiplied by 256):
-        // Y = (77*R + 150*G + 29*B) >> 8
-        
-        uint32_t yVal = (77 * r + 150 * g + 29 * b) >> 8;
+            // Calculate index in the destination (Y) buffer
+            int dstIndex = y * paddedWidth + x;
 
-        yImg->data[i] = (uint8_t) yVal;
+            uint8_t r = image->data[srcIndex];     
+            uint8_t g = image->data[srcIndex + 1];
+            uint8_t b = image->data[srcIndex + 2];
+
+            // Original: Y = 0.299*R + 0.587*G + 0.114*B
+            // Optimized whole number approximation (multiplied by 256):
+            // Y = (77*R + 150*G + 29*B) >> 8
+            uint32_t yVal = (77 * r + 150 * g + 29 * b) >> 8;
+
+            yImg->data[dstIndex] = (uint8_t) yVal;
+        }
     }
 
     return yImg;

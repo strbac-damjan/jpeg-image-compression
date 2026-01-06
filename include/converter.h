@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <stdint.h> 
 
+
+// Macro to find the minimum of two numbers
+#define MIN(a,b) (((a)<(b))?(a):(b))
+
 typedef struct {
     int width;
     int height;
