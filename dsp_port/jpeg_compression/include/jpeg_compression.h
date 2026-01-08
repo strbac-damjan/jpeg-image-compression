@@ -11,7 +11,7 @@
 #include <utils/remote_service/include/app_remote_service.h>
 //#include <utils/app_init/include/app_init.h>
 #include <utils/console_io/include/app_log.h>
-
+#include <utils/mem/include/app_mem.h>
 #include <c7x.h>
 
 
@@ -20,26 +20,34 @@
 // -------------------------------------------------------------------------------------
 // ---------------------------STRUCTURE DEFINITIONS-------------------------------------
 // -------------------------------------------------------------------------------------
-typedef struct BMPImage{
+typedef struct BMPImage {
     int32_t width;
     int32_t height;
-    uint8_t* data;  // Pixel data (RGB format). Must be freed manually.
+    uint8_t* r;  // Red channel
+    uint8_t* g;  // Green channel
+    uint8_t* b;  // Blue channel
 } BMPImage;
 
 typedef struct {
     int width;           // Image width
     int height;          // Image height
-    uchar64 *data;       // Pointer to the pixel array (length = width * height)
+    uint8_t *data;       // Pointer to the pixel array (length = width * height)
                          // Values 0-255 (where 0=black, 255=white)
 } YImage;
 
-
 typedef struct JPEG_COMPRESSION_DTO
 {
-    BMPImage* bmpImage;
+    int32_t width;
+    int32_t height;
+    
+    // Physical addresses of input channels (R, G, B)
+    uint64_t r_phy_ptr;
+    uint64_t g_phy_ptr;
+    uint64_t b_phy_ptr;
 
-    YImage* yImage;
-}JPEG_COMPRESSION_DTO;
+    // Physical address of the output buffer (Y)
+    uint64_t y_phy_ptr;
+} JPEG_COMPRESSION_DTO;
 
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
@@ -62,8 +70,23 @@ int32_t JpegCompression_Init();
 // -------------------------------------------------------------------------------------
 // ----------------------- JPEG COMPRESSION FUNCTIONS-----------------------------------
 // -------------------------------------------------------------------------------------
+
+/**
+ * \brief Extracts the Luminance (Y) component from RGB data using SIMD vectors.
+ * * This function utilizes the C7x vector engine to process 32 pixels simultaneously per iteration.
+ * The formula used is standard JPEG conversion: Y = (0.299*R + 0.587*G + 0.114*B).
+ * Fixed-point approximation: Y = (77*R + 150*G + 29*B) >> 8.
+ *
+ * \param img    Pointer to the source BMP image structure (host pointers converted to DSP pointers).
+ * \param y_out  Pointer to the destination Y-component structure.
+ */
+void extractYComponent(BMPImage *img, YImage *y_out);
+/**
+ * \brief Main entry point for the DSP processing task.
+ * * Receives the Data Transfer Object (DTO) containing physical addresses from the A72 core,
+ * maps them to the DSP's local virtual address space, and triggers the conversion.
+ */
 int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto);
-YImage* extractYComponent(BMPImage *img);
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------

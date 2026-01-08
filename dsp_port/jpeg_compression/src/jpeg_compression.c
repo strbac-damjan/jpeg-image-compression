@@ -3,7 +3,9 @@
 
 int32_t JpegCompression_RemoteServiceHandler(char *service_name, uint32_t cmd, void *prm, uint32_t prm_size, uint32_t flags)
 {
-    return 0;
+    JPEG_COMPRESSION_DTO *dto = (JPEG_COMPRESSION_DTO *)prm;
+
+    return convertToJpeg(dto);
 }
 
 int32_t JpegCompression_Init()
@@ -19,8 +21,4 @@ int32_t JpegCompression_Init()
     return status;
 }
 
-int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto) 
-{
-    return 0;
-}
 #endif

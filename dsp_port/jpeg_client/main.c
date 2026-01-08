@@ -13,8 +13,6 @@
 #include "bmp_handler.h"
 
 // Flattened DTO structure for IPC
-// The DSP cannot dereference pointers pointing to the A72 heap.
-// Therefore, we send physical addresses (uint64_t) and dimensions directly.
 typedef struct JPEG_COMPRESSION_DTO
 {
     int32_t width;
@@ -32,11 +30,14 @@ typedef struct JPEG_COMPRESSION_DTO
 int main(int argc, char* argv[])
 {
     int32_t status;
+    
+    if (argc < 2) {
+        appLogPrintf("Usage: %s <input_bmp_path>\n", argv[0]);
+        return -1;
+    }
     const char* inputPath = argv[1];
     
-    // App Initialization (Must be done first!)
-    // This is critical because loadBMPImage now uses appMemAlloc, 
-    // and appMemAlloc requires appInit() to be executed beforehand.
+    // 1. App Initialization
     appLogPrintf("JPEG: Initializing App...\n");
     status = appInit();
     if(status != 0)
@@ -46,22 +47,20 @@ int main(int argc, char* argv[])
     }
     appLogPrintf("JPEG: App initialization successful!\n");
 
-    // Load BMP image
+    // Load BMP image (Uses appMemAlloc internally)
     appLogPrintf("JPEG: Loading BMP image...\n");
-    // Inside loadBMPImage, appMemAlloc(..., 64) is now used, 
-    // so img->r, img->g, img->b are already in shared memory and aligned.
     BMPImage* img = loadBMPImage(inputPath);
 
     if(!img) {
         appLogPrintf("JPEG: Image loading failed!\n");
-        appDeInit(); // Clean up
+        appDeInit(); 
         return 1;
     }
     appLogPrintf("JPEG: BMP image loaded (Width: %d, Height: %d)!\n", img->width, img->height);
 
     // Allocate output buffer (Y Image) in Shared Memory
-    // The DSP needs a place to write the result, so this buffer must also be in shared memory.
     uint32_t pixel_count = img->width * img->height;
+    // Align to 64 bytes (cache line size / vector size)
     uint8_t* y_output_virt = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, pixel_count, 64);
     
     if (!y_output_virt) {
@@ -70,6 +69,11 @@ int main(int argc, char* argv[])
         appDeInit();
         return 1;
     }
+
+    // Inicijalizacija izlaznog bafera na 0 (da budemo sigurni da vidimo promjenu)
+    memset(y_output_virt, 0, pixel_count);
+    // Write-back keša da nule odu u RAM prije nego DSP krene
+    appMemCacheWb(y_output_virt, pixel_count); 
 
     // Prepare DTO for sending
     appLogPrintf("JPEG: Preparing data for DSP...\n");
@@ -86,7 +90,7 @@ int main(int argc, char* argv[])
     dto.y_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)y_output_virt, APP_MEM_HEAP_DDR);
 
     // Send data via Remote Service
-    appLogPrintf("JPEG: Sending data via Remote Service!\n");
+    appLogPrintf("JPEG: Sending data via Remote Service...\n");
     status = appRemoteServiceRun(
         APP_IPC_CPU_C7x_1,
         "com.etfbl.sdos.jpeg_compression",
@@ -102,22 +106,39 @@ int main(int argc, char* argv[])
     } 
     else 
     {
-        appLogPrintf("JPEG: Communication successful! Processing done.\n");
+        appLogPrintf("JPEG: DSP Processing Done! Verifying results...\n");
         
-        // Here we can check the result in y_output_virt
-        // Since the memory is mapped, the A72 immediately sees what the DSP wrote.
-        // printf("First pixel of Y image: %d\n", y_output_virt[0]);
+        // Since the DSP wrote directly to DDR memory, the A72 cache might still contain 
+        // stale data (the zeros we initialized earlier).
+        // We must invalidate the A72 cache to force a fresh read from physical RAM.
+        appMemCacheInv(y_output_virt, pixel_count);
+
+        // Print the first 64 pixels to verify the output
+        // (This gives us a quick look at the first few processed vectors)
+        appLogPrintf("--------------------------------------------------\n");
+        appLogPrintf("Y Component (First 64 pixels):\n");
+        appLogPrintf("--------------------------------------------------\n");
+        
+        for (int i = 0; i < 64 && i < pixel_count; i++) {
+            // Format the output into rows of 16 values for readability
+            if (i % 16 == 0) printf("\n[%04d]: ", i);
+            printf("%3d ", y_output_virt[i]);
+        }
+        printf("\n\n");
+        
+        // Quick heuristic check: If the values are still 0, the DSP likely didn't write anything.
+        if (y_output_virt[0] == 0 && y_output_virt[10] == 0 && y_output_virt[20] == 0) {
+            appLogPrintf("WARNING: Output seems to be all zeros. Check DSP logic.\n");
+        } else {
+            appLogPrintf("SUCCESS: Data detected in output buffer.\n");
+        }
     }
 
     // Cleanup
     appLogPrintf("JPEG: Cleaning up...\n");
     
-    // Free Y buffer
     appMemFree(APP_MEM_HEAP_DDR, y_output_virt, pixel_count);
-    
-    // Free BMP (this internally calls appMemFree for channels)
     freeBMPImage(img);
-
     appDeInit();
 
     return 0;
