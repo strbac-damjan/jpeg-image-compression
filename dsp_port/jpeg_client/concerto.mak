@@ -7,7 +7,7 @@ ifeq ($(TARGET_OS),$(filter $(TARGET_OS), LINUX QNX))
 include $(PRELUDE)
 
 # Source files
-CSOURCES    := main.c
+CSOURCES    := main.c bmp_handler.c
 
 # Name of the output executable (.out)
 TARGET      := jpeg_client_app

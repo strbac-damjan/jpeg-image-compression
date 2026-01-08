@@ -6,12 +6,19 @@
 #include <utils/app_init/include/app_init.h>
 #include <utils/console_io/include/app_log.h>
 
-// Uključiš svoj zajednički header jer si dodao IDIRS u makefile
 #include <jpeg_compression.h> 
-// Ili <jpeg_compression_common.h> ako si napravio novi fajl
 
-int main()
+#include "bmp_handler.h"
+
+int main(int argc, char* argv[])
 {
-    printf("Hello world");
+    const char* inputPath = argv[1];
+    const char* outputPath = argv[2];
+
+    BMPImage* img = loadBMPImage(inputPath);
+
+    if(img) {
+        saveBMPImage(outputPath, img);
+    }
     return 1;
 }
