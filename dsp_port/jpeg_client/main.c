@@ -122,7 +122,8 @@ int main(int argc, char* argv[])
         for (int i = 0; i < 64 && i < pixel_count; i++) {
             // Format the output into rows of 16 values for readability
             if (i % 16 == 0) printf("\n[%04d]: ", i);
-            printf("%3d ", y_output_virt[i]);
+            int8_t* signed_y = (int8_t*)y_output_virt;
+            printf("%3d ", signed_y[i]); // Ovo ce ispisati brojeve od -128 do 127
         }
         printf("\n\n");
         
