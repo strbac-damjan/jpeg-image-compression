@@ -3,9 +3,15 @@
 // Helper function to free the image memory
 void freeBMPImage(BMPImage* image) {
     if (image) {
-        if (image->r) free(image->r);
-        if (image->g) free(image->g);
-        if (image->b) free(image->b);
+        // Moramo ponovo izracunati velicinu da bi znali koliko memorije osloboditi
+        // appMemFree zahtijeva 'size' parametar.
+        uint32_t size = image->width * image->height;
+
+        if (image->r) appMemFree(APP_MEM_HEAP_DDR, image->r, size);
+        if (image->g) appMemFree(APP_MEM_HEAP_DDR, image->g, size);
+        if (image->b) appMemFree(APP_MEM_HEAP_DDR, image->b, size);
+        
+        // Strukturu oslobadjamo obicnim free jer je alocirana obicnim malloc-om
         free(image);
     }
 }
@@ -49,6 +55,7 @@ BMPImage* loadBMPImage(const char* filename) {
         return NULL;
     }
 
+    // Strukturu alociramo na heapu (CPU only), to je OK.
     BMPImage* image = (BMPImage*)malloc(sizeof(BMPImage));
     if (!image) {
         fprintf(stderr, "Error: Memory allocation failed for BMPImage struct.\n");
@@ -72,13 +79,14 @@ BMPImage* loadBMPImage(const char* filename) {
     int rowPadded = (image->width * 3 + 3) & (~3);
     size_t pixelCount = (size_t)image->width * image->height;
 
-    // Allocate memory for separate channels
-    image->r = (uint8_t*)malloc(pixelCount);
-    image->g = (uint8_t*)malloc(pixelCount);
-    image->b = (uint8_t*)malloc(pixelCount);
+    // --- PROMJENA: Alociranje Shared Memory za kanale ---
+    // Koristimo appMemAlloc sa poravnanjem od 64 bajta (kljucno za C7x vektore)
+    image->r = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, pixelCount, 64);
+    image->g = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, pixelCount, 64);
+    image->b = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, pixelCount, 64);
 
     if (!image->r || !image->g || !image->b) {
-        fprintf(stderr, "Error: Memory allocation failed for pixel channels.\n");
+        fprintf(stderr, "Error: Shared Memory allocation failed for pixel channels.\n");
         freeBMPImage(image); // This handles freeing whatever was allocated
         fclose(file);
         return NULL;
@@ -91,6 +99,7 @@ BMPImage* loadBMPImage(const char* filename) {
         return NULL;
     }
 
+    // rowDataBuffer je privremeni buffer samo za CPU, on moze ostati obican malloc
     uint8_t* rowDataBuffer = (uint8_t*)malloc(rowPadded);
     if (!rowDataBuffer) {
         fprintf(stderr, "Error: Memory allocation failed for row buffer.\n");
@@ -119,7 +128,7 @@ BMPImage* loadBMPImage(const char* filename) {
             uint8_t G = rowDataBuffer[j * 3 + 1];
             uint8_t R = rowDataBuffer[j * 3 + 2];
 
-            // Store in separate arrays
+            // Store in separate arrays (koji su sada u shared memory)
             image->r[pixelIdx] = R;
             image->g[pixelIdx] = G;
             image->b[pixelIdx] = B;
@@ -132,6 +141,8 @@ BMPImage* loadBMPImage(const char* filename) {
 }
 
 // Saves a BMP image to a file.
+// Ovu funkciju ne moramo mijenjati jer CPU (A72) moze citati i shared memory 
+// preko virtualnih adresa koje su sacuvane u image->r/g/b.
 bool saveBMPImage(const char* filename, const BMPImage* image) {
     if (!image || !image->r || !image->g || !image->b) return false;
 

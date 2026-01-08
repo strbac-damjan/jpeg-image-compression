@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <utils/mem/include/app_mem.h> 
+
 // BMP file format structures
 #pragma pack(push, 1)
 typedef struct BMPFileHeader{
