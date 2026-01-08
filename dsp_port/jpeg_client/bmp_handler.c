@@ -1,12 +1,11 @@
 #include "bmp_handler.h"
 
-
 // Helper function to free the image memory
 void freeBMPImage(BMPImage* image) {
     if (image) {
-        if (image->data) {
-            free(image->data);
-        }
+        if (image->r) free(image->r);
+        if (image->g) free(image->g);
+        if (image->b) free(image->b);
         free(image);
     }
 }
@@ -26,7 +25,6 @@ BMPImage* loadBMPImage(const char* filename) {
         return NULL;
     }
 
-    // Check if the file is a BMP file by checking the magic number
     if (fileHeader.bfType != 0x4D42) {
         fprintf(stderr, "Error: File is not a valid BMP file.\n");
         fclose(file);
@@ -40,7 +38,6 @@ BMPImage* loadBMPImage(const char* filename) {
         return NULL;
     }
 
-    // Check if the image is 24-bit and uncompressed
     if (infoHeader.biBitCount != 24) {
         fprintf(stderr, "Error: Only 24-bit BMP images are supported.\n");
         fclose(file);
@@ -52,39 +49,41 @@ BMPImage* loadBMPImage(const char* filename) {
         return NULL;
     }
 
-    // Allocate memory for the BMPImage structure
     BMPImage* image = (BMPImage*)malloc(sizeof(BMPImage));
     if (!image) {
         fprintf(stderr, "Error: Memory allocation failed for BMPImage struct.\n");
         fclose(file);
         return NULL;
     }
+    // Initialize pointers to NULL for safe freeing on error
+    image->r = NULL;
+    image->g = NULL;
+    image->b = NULL;
 
     image->width = infoHeader.biWidth;
     image->height = infoHeader.biHeight;
 
-    // If the image height is negative, the image is in top-down format;
-    // otherwise, we need to invert the rows to store them in top-down format.
     bool flipVertical = true;
     if (image->height < 0) {
         image->height = -image->height;
         flipVertical = false;
     }
 
-    // Every row of pixel data is padded to a multiple of 4 bytes.
     int rowPadded = (image->width * 3 + 3) & (~3);
-    
-    // Allocate memory for pixel data
-    size_t dataSize = image->width * image->height * 3;
-    image->data = (uint8_t*)malloc(dataSize);
-    if (!image->data) {
-        fprintf(stderr, "Error: Memory allocation failed for pixel data.\n");
-        free(image);
+    size_t pixelCount = (size_t)image->width * image->height;
+
+    // Allocate memory for separate channels
+    image->r = (uint8_t*)malloc(pixelCount);
+    image->g = (uint8_t*)malloc(pixelCount);
+    image->b = (uint8_t*)malloc(pixelCount);
+
+    if (!image->r || !image->g || !image->b) {
+        fprintf(stderr, "Error: Memory allocation failed for pixel channels.\n");
+        freeBMPImage(image); // This handles freeing whatever was allocated
         fclose(file);
         return NULL;
     }
 
-    // Seek to the offset where the pixel data starts
     if (fseek(file, fileHeader.bfOffBits, SEEK_SET) != 0) {
         fprintf(stderr, "Error: Unable to seek to bitmap data.\n");
         freeBMPImage(image);
@@ -110,16 +109,20 @@ BMPImage* loadBMPImage(const char* filename) {
         }
 
         int destRow = flipVertical ? (image->height - 1 - i) : i;
+        
         for (int j = 0; j < image->width; j++) {
-            // BMP format stores pixels in BGR order, so we need to swap them to RGB.
+            // Calculate linear index for this pixel
+            int pixelIdx = destRow * image->width + j;
+
+            // BMP is BGR
             uint8_t B = rowDataBuffer[j * 3 + 0];
             uint8_t G = rowDataBuffer[j * 3 + 1];
             uint8_t R = rowDataBuffer[j * 3 + 2];
 
-            int idx = (destRow * image->width + j) * 3;
-            image->data[idx + 0] = R;
-            image->data[idx + 1] = G;
-            image->data[idx + 2] = B;
+            // Store in separate arrays
+            image->r[pixelIdx] = R;
+            image->g[pixelIdx] = G;
+            image->b[pixelIdx] = B;
         }
     }
 
@@ -128,19 +131,16 @@ BMPImage* loadBMPImage(const char* filename) {
     return image;
 }
 
-// Saves a BMP image to a file (24-bit uncompressed BMP format).
-// Returns true if the operation is successful, otherwise false.
+// Saves a BMP image to a file.
 bool saveBMPImage(const char* filename, const BMPImage* image) {
-    if (!image || !image->data) return false;
+    if (!image || !image->r || !image->g || !image->b) return false;
 
-    // Calculating the size of a row with padding (row must be aligned to 4 bytes)
     int rowSize = image->width * 3;
     int rowPadded = (rowSize + 3) & (~3);
     uint32_t dataSize = rowPadded * image->height;
 
-    // Preparing BMP file header
     BMPFileHeader fileHeader;
-    fileHeader.bfType = 0x4D42; // "BM"
+    fileHeader.bfType = 0x4D42; 
     fileHeader.bfOffBits = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader);
     fileHeader.bfSize = fileHeader.bfOffBits + dataSize;
     fileHeader.bfReserved1 = 0;
@@ -154,8 +154,6 @@ bool saveBMPImage(const char* filename, const BMPImage* image) {
     infoHeader.biBitCount = 24;
     infoHeader.biCompression = 0;
     infoHeader.biSizeImage = dataSize;
-
-    // Using arbitrary values for resolution (e.g., 2835 pixels/meter ~ 72 DPI)
     infoHeader.biXPelsPerMeter = 2835;
     infoHeader.biYPelsPerMeter = 2835;
     infoHeader.biClrUsed = 0;
@@ -167,7 +165,6 @@ bool saveBMPImage(const char* filename, const BMPImage* image) {
         return false;
     }
 
-    // Write the file header and info header to the file
     if (fwrite(&fileHeader, sizeof(BMPFileHeader), 1, file) != 1) {
         fclose(file);
         return false;
@@ -177,23 +174,24 @@ bool saveBMPImage(const char* filename, const BMPImage* image) {
         return false;
     }
 
-    // Preparing a temporary buffer for the row (with padding bytes)
-    uint8_t* rowData = (uint8_t*)calloc(rowPadded, 1); // calloc initializes to 0
+    uint8_t* rowData = (uint8_t*)calloc(rowPadded, 1);
     if (!rowData) {
         fclose(file);
         return false;
     }
 
-    // BMP expects bottom-up order; since the data in BMPImage is in top-down order, 
-    // we iterate in reverse order.
+    // Iterate bottom-up (standard BMP)
     for (int i = image->height - 1; i >= 0; i--) {
         for (int j = 0; j < image->width; j++) {
-            int idx = (i * image->width + j) * 3;
-            uint8_t R = image->data[idx + 0];
-            uint8_t G = image->data[idx + 1];
-            uint8_t B = image->data[idx + 2];
+            // Get linear index for the pixel
+            int pixelIdx = i * image->width + j;
+
+            // Retrieve from separate arrays
+            uint8_t R = image->r[pixelIdx];
+            uint8_t G = image->g[pixelIdx];
+            uint8_t B = image->b[pixelIdx];
             
-            // BMP format stores pixels in BGR order
+            // Pack into BGR row buffer
             rowData[j * 3 + 0] = B;
             rowData[j * 3 + 1] = G;
             rowData[j * 3 + 2] = R;

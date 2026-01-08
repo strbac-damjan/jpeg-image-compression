@@ -34,10 +34,12 @@ typedef struct BMPInfoHeader{
 } BMPInfoHeader;
 #pragma pack(pop)
 
-typedef struct BMPImage{
+typedef struct BMPImage {
     int32_t width;
     int32_t height;
-    uint8_t* data;  // Pixel data (RGB format). Must be freed manually.
+    uint8_t* r;  // Red channel
+    uint8_t* g;  // Green channel
+    uint8_t* b;  // Blue channel
 } BMPImage;
 
 void freeBMPImage(BMPImage* image);
