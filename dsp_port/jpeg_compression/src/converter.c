@@ -114,11 +114,23 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
         return -1; 
     }
 
-    /* Step 1: Color Space Conversion and Level Shifting (Vectorized) */
+    // Color Space Conversion and Level Shifting (Vectorized)
     extractYComponent(&inputImg, &yImg);
 
-    /* Step 2: Forward Discrete Cosine Transform (Vectorized) */
+    // Forward Discrete Cosine Transform (Vectorized)
     computeDCT(&yImg, &dctImg);
+
+    QuantizedImage qImg;
+    qImg.width = dto->width;
+    qImg.height = dto->height;
+    
+    if (dto->quant_phy_ptr != 0) {
+        qImg.data = (int16_t *)(uintptr_t)appMemShared2TargetPtr(dto->quant_phy_ptr);
+    } else {
+        return -3; // Error: No output buffer for Quantization provided
+    }
+
+    quantizeImage(&dctImg, &qImg);
 
     return 0; // Success
 }

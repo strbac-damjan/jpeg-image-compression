@@ -164,6 +164,15 @@ bool saveJPEGGrayscale(const char *filename, const BMPImage* img)
         freeYImage(yImage);
         return false;
     }
+
+    printf("Natural C quant (First Block):\n");
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            int index = y * quantizedImage->width + x; 
+            printf("%d ", quantizedImage->data[index]);
+        }
+        printf("\n");
+    }
     
     // Zig-Zag Scanning
     ZigZagData *zzd = performZigZag(quantizedImage);

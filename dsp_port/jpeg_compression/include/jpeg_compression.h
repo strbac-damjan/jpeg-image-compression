@@ -41,23 +41,31 @@ typedef struct {
     float *coefficients; // Width * Height
 } DCTImage;
 
+typedef struct {
+    int32_t width;
+    int32_t height;
+    int16_t *data; // 16-bit signed integers for quantized values
+} QuantizedImage;
+
+// --- Updated DTO ---
 typedef struct JPEG_COMPRESSION_DTO
 {
     int32_t width;
     int32_t height;
     
-    // Input RGB Physical Addresses
+    // Inputs
     uint64_t r_phy_ptr;
     uint64_t g_phy_ptr;
     uint64_t b_phy_ptr;
 
-    // Output Y Physical Address (Intermediate)
+    // Intermediate Outputs
     uint64_t y_phy_ptr;
-    
-    // Output DCT Coefficients Physical Address (Final)
-    uint64_t dct_phy_ptr; 
-} JPEG_COMPRESSION_DTO;
+    uint64_t dct_phy_ptr;
 
+    // Final Output (NEW)
+    uint64_t quant_phy_ptr; 
+
+} JPEG_COMPRESSION_DTO;
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
@@ -93,6 +101,8 @@ void extractYComponent(BMPImage *img, YImage *y_out);
 
 
 void computeDCT(YImage *y_img, DCTImage *dct_out);
+
+void quantizeImage(DCTImage *dct_img, QuantizedImage *q_img);
 
 /**
  * \brief Main entry point for the DSP processing task.
