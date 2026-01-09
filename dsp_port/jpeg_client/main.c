@@ -9,12 +9,19 @@
 #include <utils/console_io/include/app_log.h>
 #include <utils/mem/include/app_mem.h> 
 
+// Ensure jpeg_compression.h includes the RLESymbol definition we added earlier
 #include <jpeg_compression.h> 
 #include "bmp_handler.h"
 
+typedef struct {
+    uint8_t symbol;    // (Run << 4) | Size
+    uint8_t codeBits;  // Number of significant bits
+    uint16_t code;     // The amplitude value (variable length bits)
+} RLESymbol;
+
+
 /* * DTO structure shared between A72 (Host) and C7x (DSP).
  * This definition must match the one in the DSP source code (jpeg_compression.h) exactly.
- * UPDATED: Now includes zigzag_phy_ptr.
  */
 typedef struct JPEG_COMPRESSION_DTO
 {
@@ -35,8 +42,14 @@ typedef struct JPEG_COMPRESSION_DTO
     // Physical address of the output buffer (Quantized Coefficients - intermediate)
     uint64_t quant_phy_ptr;
 
-    // Physical address of the output buffer (ZigZag Scanned - final for this step)
+    // Physical address of the output buffer (ZigZag Scanned - intermediate)
     uint64_t zigzag_phy_ptr;
+
+    // Physical address of the output buffer (RLE Symbols - final)
+    uint64_t rle_phy_ptr;
+    
+    // OUTPUT: Number of RLE symbols written by DSP
+    uint32_t rle_count;
 
 } JPEG_COMPRESSION_DTO;
 
@@ -90,16 +103,21 @@ int main(int argc, char* argv[])
     int16_t* quant_output_virt = (int16_t*)appMemAlloc(APP_MEM_HEAP_DDR, quant_size_bytes, 64);
     
     // D) ZigZag Scanned Buffer (2 bytes per pixel - int16_t)
-    // Same size as Quantized buffer, just different order
     int16_t* zigzag_output_virt = (int16_t*)appMemAlloc(APP_MEM_HEAP_DDR, quant_size_bytes, 64);
 
+    // E) RLE Output Buffer (4 bytes per symbol)
+    // We allocate a "worst case" size (1 symbol per pixel), though real usage is much lower.
+    uint32_t rle_size_bytes = pixel_count * sizeof(RLESymbol);
+    RLESymbol* rle_output_virt = (RLESymbol*)appMemAlloc(APP_MEM_HEAP_DDR, rle_size_bytes, 64);
+
     // Check allocations
-    if (!y_output_virt || !dct_output_virt || !quant_output_virt || !zigzag_output_virt) {
+    if (!y_output_virt || !dct_output_virt || !quant_output_virt || !zigzag_output_virt || !rle_output_virt) {
         appLogPrintf("JPEG: Failed to allocate output memory!\n");
         if(y_output_virt) appMemFree(APP_MEM_HEAP_DDR, y_output_virt, pixel_count);
         if(dct_output_virt) appMemFree(APP_MEM_HEAP_DDR, dct_output_virt, dct_size_bytes);
         if(quant_output_virt) appMemFree(APP_MEM_HEAP_DDR, quant_output_virt, quant_size_bytes);
         if(zigzag_output_virt) appMemFree(APP_MEM_HEAP_DDR, zigzag_output_virt, quant_size_bytes);
+        if(rle_output_virt) appMemFree(APP_MEM_HEAP_DDR, rle_output_virt, rle_size_bytes);
         freeBMPImage(img);
         appDeInit();
         return 1;
@@ -110,12 +128,14 @@ int main(int argc, char* argv[])
     memset(dct_output_virt, 0, dct_size_bytes);
     memset(quant_output_virt, 0, quant_size_bytes);
     memset(zigzag_output_virt, 0, quant_size_bytes);
+    memset(rle_output_virt, 0, rle_size_bytes);
 
     // Perform Cache Write-back to flush zeros to DDR
     appMemCacheWb(y_output_virt, pixel_count);
     appMemCacheWb(dct_output_virt, dct_size_bytes);
     appMemCacheWb(quant_output_virt, quant_size_bytes);
     appMemCacheWb(zigzag_output_virt, quant_size_bytes);
+    appMemCacheWb(rle_output_virt, rle_size_bytes);
 
     /* -------------------------------------------------------------------------
      * Prepare DTO for IPC
@@ -136,6 +156,10 @@ int main(int argc, char* argv[])
     dto.dct_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)dct_output_virt, APP_MEM_HEAP_DDR);
     dto.quant_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)quant_output_virt, APP_MEM_HEAP_DDR);
     dto.zigzag_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)zigzag_output_virt, APP_MEM_HEAP_DDR);
+    
+    // RLE setup
+    dto.rle_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)rle_output_virt, APP_MEM_HEAP_DDR);
+    dto.rle_count = 0; // Initialize count
 
     /* -------------------------------------------------------------------------
      * Send command via Remote Service
@@ -169,6 +193,7 @@ int main(int argc, char* argv[])
         appMemCacheInv(dct_output_virt, dct_size_bytes);
         appMemCacheInv(quant_output_virt, quant_size_bytes);
         appMemCacheInv(zigzag_output_virt, quant_size_bytes);
+        appMemCacheInv(rle_output_virt, rle_size_bytes);
 
         // --- Verify Y Component ---
         appLogPrintf("\n--------------------------------------------------\n");
@@ -215,25 +240,48 @@ int main(int argc, char* argv[])
         appLogPrintf("\n--------------------------------------------------\n");
         appLogPrintf("Zig-Zag Output (First 8x8 Block - Linearized):\n");
         appLogPrintf("--------------------------------------------------\n");
-        
-        // Note: Unlike previous steps, the Zig-Zag buffer is organized block-by-block.
-        // The first 64 integers in memory correspond exactly to the first 8x8 block 
-        // in Zig-Zag order. We don't need to stride by 'width'.
-        
         for (int i = 0; i < 64; i++) {
-            // Formatting: Print 8 values per line for readability
             if (i % 8 == 0) printf("\nLine %d: ", i/8);
             printf("%4d ", zigzag_output_virt[i]);
         }
-        printf("\n\n");
+        printf("\n");
+
+        // --- Verify RLE Output ---
+        appLogPrintf("\n--------------------------------------------------\n");
+        appLogPrintf("RLE Output (Total Symbols Generated: %d)\n", dto.rle_count);
+        appLogPrintf("--------------------------------------------------\n");
         
-        // Simple sanity check: The DC coefficient (index 0) is usually non-zero
-        // and high frequency coefficients (near index 63) are usually zero.
-        if (zigzag_output_virt[0] == 0 && zigzag_output_virt[1] == 0) {
-             appLogPrintf("WARNING: ZigZag output seems suspicious (all zeros?).\n");
+        if (dto.rle_count == 0) {
+            appLogPrintf("WARNING: RLE count is 0. Something went wrong on DSP.\n");
         } else {
-             appLogPrintf("SUCCESS: ZigZag Data detected (DC: %d).\n", zigzag_output_virt[0]);
+            // Print first 40 symbols for verification
+            int limit = (dto.rle_count < 40) ? dto.rle_count : 40;
+            
+            for (int i = 0; i < limit; i++) {
+                RLESymbol s = rle_output_virt[i];
+                uint8_t run = s.symbol >> 4;
+                uint8_t size = s.symbol & 0x0F;
+                
+                // Format: [Index] SymbolHex (Run, Size) : CodeVal
+                printf("[%3d] Sym:0x%02X (Run:%2d, Size:%2d) Code:%5d (Bits:%d)", 
+                       i, s.symbol, run, size, s.code, s.codeBits);
+                       
+                if (s.symbol == 0x00) printf(" <--- EOB");
+                if (i == 0) printf(" <--- DC of Block 0");
+                
+                printf("\n");
+            }
+            
+            // Calculate compression ratio (simplified, assuming input was 1 byte/pixel Y-only for now)
+            // Original Y size: pixel_count bytes
+            // Compressed size (approx): rle_count * 2 bytes (conservatively, though Huffman packs tighter)
+            float compression_ratio = ((float)dto.rle_count * sizeof(RLESymbol)) / (float)pixel_count;
+            appLogPrintf("\nIntermediate Compression Info:\n");
+            appLogPrintf("Raw Pixels: %d\n", pixel_count);
+            appLogPrintf("RLE Symbols: %d\n", dto.rle_count);
+            appLogPrintf("RLE Symbol Buffer Usage: %.2f%% of original size\n", compression_ratio * 100.0f);
         }
+        printf("\n");
     }
 
     // Cleanup resources
@@ -243,6 +291,7 @@ int main(int argc, char* argv[])
     if(dct_output_virt) appMemFree(APP_MEM_HEAP_DDR, dct_output_virt, dct_size_bytes);
     if(quant_output_virt) appMemFree(APP_MEM_HEAP_DDR, quant_output_virt, quant_size_bytes);
     if(zigzag_output_virt) appMemFree(APP_MEM_HEAP_DDR, zigzag_output_virt, quant_size_bytes);
+    if(rle_output_virt) appMemFree(APP_MEM_HEAP_DDR, rle_output_virt, rle_size_bytes);
     
     freeBMPImage(img);
     appDeInit();

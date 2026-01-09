@@ -144,6 +144,27 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     // Call the Zig-Zag function
     performZigZag(&qImg, zigzagData);
 
+    RLESymbol *rleData = NULL;
+
+    int32_t max_rle_capacity = dto->width * dto->height * 2; 
+
+    if (dto->rle_phy_ptr != 0) {
+        rleData = (RLESymbol *)(uintptr_t)appMemShared2TargetPtr(dto->rle_phy_ptr);
+    } else {
+        return -5; // Error: No output buffer for RLE provided
+    }
+
+    // Execute RLE
+    // Note: 'zigzagData' pointer was retrieved in Step 4
+    int32_t produced_symbols = performRLE(zigzagData, dto->width, dto->height, rleData, max_rle_capacity);
+
+    if (produced_symbols < 0) {
+        return -6; // Error: RLE Buffer Overflow
+    }
+
+    // Write back the count so the Host knows how much valid data to read
+    dto->rle_count = produced_symbols;
+
     return 0; // Success
 }
 #endif
