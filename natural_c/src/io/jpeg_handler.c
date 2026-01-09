@@ -21,14 +21,29 @@ bool write_app0(FILE *file)
     return fwrite(&app0, sizeof(app0), 1, file) == 1;
 }
 
-// Write DQT (Quantization Table)
+// Standard Zigzag mapping table
+const unsigned char zigzag_map[64] = {
+     0,  1,  8, 16,  9,  2,  3, 10,
+    17, 24, 32, 25, 18, 11,  4,  5,
+    12, 19, 26, 33, 40, 48, 41, 34,
+    27, 20, 13,  6,  7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36,
+    29, 22, 15, 23, 30, 37, 44, 51,
+    58, 59, 52, 45, 38, 31, 39, 46,
+    53, 60, 61, 54, 47, 55, 62, 63
+};
+
 bool write_dqt(FILE *file)
 {
     JPEG_DQT dqt;
     dqt.marker = SWAP16(0xFFDB);
-    dqt.length = SWAP16(67); // 2 + 1 + 64
-    dqt.qt_info = 0x00;      // ID 0, 8-bit
-    memcpy(dqt.table, std_luminance_quant_tbl, 64);
+    dqt.length = SWAP16(67);
+    dqt.qt_info = 0x00;
+
+    // Apply Zigzag reordering
+    for (int i = 0; i < 64; i++) {
+        dqt.table[i] = std_luminance_quant_tbl[zigzag_map[i]];
+    }
 
     return fwrite(&dqt, sizeof(dqt), 1, file) == 1;
 }
@@ -148,6 +163,15 @@ bool saveJPEGGrayscale(const char *filename, const BMPImage* img)
         freeCenteredYImage(centeredYImage);
         freeYImage(yImage);
         return false;
+    }
+
+    printf("Natural C quant (First Block):\n");
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            int index = y * quantizedImage->width + x; 
+            printf("%d ", quantizedImage->data[index]);
+        }
+        printf("\n");
     }
     
     // Zig-Zag Scanning

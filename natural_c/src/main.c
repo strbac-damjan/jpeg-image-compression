@@ -6,10 +6,10 @@ int main(int argc, char *argv[]) {
     // argv[0] is the program name
     // argv[1] is the input file path 
     // argv[2] is the output file path
-    // if (argc != 3) {
-    //     fprintf(stderr, "Usage: %s <input_file_path> <output_file_path>\n", argv[0]);
-    //     return 1;
-    // }
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <input_file_path> <output_file_path>\n", argv[0]);
+        return 1;
+    }
 
     const char* inputPath = argv[1];
     const char* outputPath = argv[2];
