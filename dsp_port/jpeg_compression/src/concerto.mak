@@ -17,4 +17,6 @@ IDIRS       += $(VISION_APPS_PATH)/utils/mem/include
 IDIRS       += $(VISION_APPS_PATH)/utils/ipc/include
 IDIRS       += $(PSDKR_PATH)/psdk_tools/ti-cgt-c7000_4.1.0.LTS/include
 
+CFLAGS += --opt_info=2 --gen_opt_info=2 -k --src_interlist --debug_software_pipeline
+
 include $(FINALE)
