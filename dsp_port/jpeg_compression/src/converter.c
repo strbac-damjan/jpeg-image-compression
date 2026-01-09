@@ -165,6 +165,27 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     // Write back the count so the Host knows how much valid data to read
     dto->rle_count = produced_symbols;
 
+    uint8_t *huffData = NULL;
+    
+    // We assume Host allocated enough space (e.g., PixelCount bytes)
+    if (dto->huff_phy_ptr != 0) {
+        huffData = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->huff_phy_ptr);
+    } else {
+        return -7; // Error: No output buffer for Huffman
+    }
+    
+    // Max capacity is the allocated size on host. Since we don't pass explicit size in DTO
+    // (we could add it, but for now assuming it's large enough based on usage), 
+    // let's assume safely it's at least width*height.
+    int32_t huff_capacity = dto->width * dto->height; 
+
+    int32_t bytesWritten = performHuffman(rleData, dto->rle_count, huffData, huff_capacity);
+    
+    if (bytesWritten < 0) {
+        return -8; // Error inside Huffman
+    }
+    
+    dto->huff_size = bytesWritten;
     return 0; // Success
 }
 #endif

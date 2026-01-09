@@ -59,19 +59,24 @@ typedef struct JPEG_COMPRESSION_DTO
     int32_t width;
     int32_t height;
     
-    // Inputs
+    // Inputs (R, G, B)
     uint64_t r_phy_ptr;
     uint64_t g_phy_ptr;
     uint64_t b_phy_ptr;
 
-    // Intermediate Outputs
+    // Intermediate
     uint64_t y_phy_ptr;
     uint64_t dct_phy_ptr;
     uint64_t quant_phy_ptr;
     uint64_t zigzag_phy_ptr;
 
-    uint64_t rle_phy_ptr;  // Buffer for RLESymbols
-    uint32_t rle_count;    // OUTPUT: DSP writes how many symbols were produced
+    // RLE Output (Input to Huffman)
+    uint64_t rle_phy_ptr;
+    uint32_t rle_count; // Number of symbols
+
+    // Huffman Output (Final Bitstream)
+    uint64_t huff_phy_ptr; // NEW
+    uint32_t huff_size;    // NEW: Output size in bytes
 
 } JPEG_COMPRESSION_DTO;
 // -------------------------------------------------------------------------------------
@@ -115,6 +120,8 @@ void quantizeImage(DCTImage *dct_img, QuantizedImage *q_img);
 void performZigZag(QuantizedImage *q_img, int16_t *zigzag_out);
 
 int32_t performRLE(int16_t *zigzag_data, int32_t width, int32_t height, RLESymbol *rle_out, int32_t max_capacity);
+
+int32_t performHuffman(RLESymbol *rleData, int32_t numSymbols, uint8_t *outBuffer, int32_t bufferCapacity);
 
 /**
  * \brief Main entry point for the DSP processing task.
