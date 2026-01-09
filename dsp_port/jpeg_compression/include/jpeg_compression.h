@@ -47,7 +47,6 @@ typedef struct {
     int16_t *data; // 16-bit signed integers for quantized values
 } QuantizedImage;
 
-// --- Updated DTO ---
 typedef struct JPEG_COMPRESSION_DTO
 {
     int32_t width;
@@ -61,9 +60,11 @@ typedef struct JPEG_COMPRESSION_DTO
     // Intermediate Outputs
     uint64_t y_phy_ptr;
     uint64_t dct_phy_ptr;
+    uint64_t quant_phy_ptr;
 
-    // Final Output (NEW)
-    uint64_t quant_phy_ptr; 
+    // Points to a buffer of size (Width * Height * sizeof(int16_t))
+    // Layout: Block 0 [0..63], Block 1 [0..63], ...
+    uint64_t zigzag_phy_ptr; 
 
 } JPEG_COMPRESSION_DTO;
 // -------------------------------------------------------------------------------------
@@ -103,6 +104,8 @@ void extractYComponent(BMPImage *img, YImage *y_out);
 void computeDCT(YImage *y_img, DCTImage *dct_out);
 
 void quantizeImage(DCTImage *dct_img, QuantizedImage *q_img);
+
+void performZigZag(QuantizedImage *q_img, int16_t *zigzag_out);
 
 /**
  * \brief Main entry point for the DSP processing task.

@@ -14,7 +14,7 @@
 
 /* * DTO structure shared between A72 (Host) and C7x (DSP).
  * This definition must match the one in the DSP source code (jpeg_compression.h) exactly.
- * UPDATED: Now includes quant_phy_ptr.
+ * UPDATED: Now includes zigzag_phy_ptr.
  */
 typedef struct JPEG_COMPRESSION_DTO
 {
@@ -32,8 +32,11 @@ typedef struct JPEG_COMPRESSION_DTO
     // Physical address of the output buffer (DCT Coefficients - intermediate)
     uint64_t dct_phy_ptr;
 
-    // Physical address of the output buffer (Quantized Coefficients - final)
+    // Physical address of the output buffer (Quantized Coefficients - intermediate)
     uint64_t quant_phy_ptr;
+
+    // Physical address of the output buffer (ZigZag Scanned - final for this step)
+    uint64_t zigzag_phy_ptr;
 
 } JPEG_COMPRESSION_DTO;
 
@@ -86,12 +89,17 @@ int main(int argc, char* argv[])
     uint32_t quant_size_bytes = pixel_count * sizeof(int16_t);
     int16_t* quant_output_virt = (int16_t*)appMemAlloc(APP_MEM_HEAP_DDR, quant_size_bytes, 64);
     
+    // D) ZigZag Scanned Buffer (2 bytes per pixel - int16_t)
+    // Same size as Quantized buffer, just different order
+    int16_t* zigzag_output_virt = (int16_t*)appMemAlloc(APP_MEM_HEAP_DDR, quant_size_bytes, 64);
+
     // Check allocations
-    if (!y_output_virt || !dct_output_virt || !quant_output_virt) {
+    if (!y_output_virt || !dct_output_virt || !quant_output_virt || !zigzag_output_virt) {
         appLogPrintf("JPEG: Failed to allocate output memory!\n");
         if(y_output_virt) appMemFree(APP_MEM_HEAP_DDR, y_output_virt, pixel_count);
         if(dct_output_virt) appMemFree(APP_MEM_HEAP_DDR, dct_output_virt, dct_size_bytes);
         if(quant_output_virt) appMemFree(APP_MEM_HEAP_DDR, quant_output_virt, quant_size_bytes);
+        if(zigzag_output_virt) appMemFree(APP_MEM_HEAP_DDR, zigzag_output_virt, quant_size_bytes);
         freeBMPImage(img);
         appDeInit();
         return 1;
@@ -101,11 +109,13 @@ int main(int argc, char* argv[])
     memset(y_output_virt, 0, pixel_count);
     memset(dct_output_virt, 0, dct_size_bytes);
     memset(quant_output_virt, 0, quant_size_bytes);
+    memset(zigzag_output_virt, 0, quant_size_bytes);
 
     // Perform Cache Write-back to flush zeros to DDR
     appMemCacheWb(y_output_virt, pixel_count);
     appMemCacheWb(dct_output_virt, dct_size_bytes);
     appMemCacheWb(quant_output_virt, quant_size_bytes);
+    appMemCacheWb(zigzag_output_virt, quant_size_bytes);
 
     /* -------------------------------------------------------------------------
      * Prepare DTO for IPC
@@ -125,6 +135,7 @@ int main(int argc, char* argv[])
     dto.y_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)y_output_virt, APP_MEM_HEAP_DDR);
     dto.dct_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)dct_output_virt, APP_MEM_HEAP_DDR);
     dto.quant_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)quant_output_virt, APP_MEM_HEAP_DDR);
+    dto.zigzag_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)zigzag_output_virt, APP_MEM_HEAP_DDR);
 
     /* -------------------------------------------------------------------------
      * Send command via Remote Service
@@ -153,10 +164,11 @@ int main(int argc, char* argv[])
          * -------------------------------------------------------------------------
          */
 
-        // Invalidate A72 cache for all output buffers to read fresh data from DDR
+        // Invalidate A72 cache for all output buffers
         appMemCacheInv(y_output_virt, pixel_count);
         appMemCacheInv(dct_output_virt, dct_size_bytes);
         appMemCacheInv(quant_output_virt, quant_size_bytes);
+        appMemCacheInv(zigzag_output_virt, quant_size_bytes);
 
         // --- Verify Y Component ---
         appLogPrintf("\n--------------------------------------------------\n");
@@ -173,7 +185,6 @@ int main(int argc, char* argv[])
         appLogPrintf("\n--------------------------------------------------\n");
         appLogPrintf("DCT Coefficients (First 8x8 Block):\n");
         appLogPrintf("--------------------------------------------------\n");
-        
         for (int row = 0; row < 8; row++) {
             printf("\nRow %d: ", row);
             for (int col = 0; col < 8; col++) {
@@ -189,24 +200,39 @@ int main(int argc, char* argv[])
         appLogPrintf("\n--------------------------------------------------\n");
         appLogPrintf("Quantized Coefficients (First 8x8 Block):\n");
         appLogPrintf("--------------------------------------------------\n");
-
         for (int row = 0; row < 8; row++) {
             printf("\nRow %d: ", row);
             for (int col = 0; col < 8; col++) {
                 int idx = row * img->width + col;
                 if (idx < pixel_count) {
-                    // Use %4d for int16_t
                     printf("%4d ", quant_output_virt[idx]);
                 }
             }
         }
+        printf("\n");
+
+        // --- Verify Zig-Zag Output ---
+        appLogPrintf("\n--------------------------------------------------\n");
+        appLogPrintf("Zig-Zag Output (First 8x8 Block - Linearized):\n");
+        appLogPrintf("--------------------------------------------------\n");
+        
+        // Note: Unlike previous steps, the Zig-Zag buffer is organized block-by-block.
+        // The first 64 integers in memory correspond exactly to the first 8x8 block 
+        // in Zig-Zag order. We don't need to stride by 'width'.
+        
+        for (int i = 0; i < 64; i++) {
+            // Formatting: Print 8 values per line for readability
+            if (i % 8 == 0) printf("\nLine %d: ", i/8);
+            printf("%4d ", zigzag_output_virt[i]);
+        }
         printf("\n\n");
         
-        // Simple sanity check
-        if (quant_output_virt[0] == 0 && quant_output_virt[1] == 0 && quant_output_virt[2] == 0) {
-             appLogPrintf("WARNING: Quantized output seems to be all zeros. Check DSP logic or input data.\n");
+        // Simple sanity check: The DC coefficient (index 0) is usually non-zero
+        // and high frequency coefficients (near index 63) are usually zero.
+        if (zigzag_output_virt[0] == 0 && zigzag_output_virt[1] == 0) {
+             appLogPrintf("WARNING: ZigZag output seems suspicious (all zeros?).\n");
         } else {
-             appLogPrintf("SUCCESS: Quantized Data detected.\n");
+             appLogPrintf("SUCCESS: ZigZag Data detected (DC: %d).\n", zigzag_output_virt[0]);
         }
     }
 
@@ -216,6 +242,7 @@ int main(int argc, char* argv[])
     if(y_output_virt) appMemFree(APP_MEM_HEAP_DDR, y_output_virt, pixel_count);
     if(dct_output_virt) appMemFree(APP_MEM_HEAP_DDR, dct_output_virt, dct_size_bytes);
     if(quant_output_virt) appMemFree(APP_MEM_HEAP_DDR, quant_output_virt, quant_size_bytes);
+    if(zigzag_output_virt) appMemFree(APP_MEM_HEAP_DDR, zigzag_output_virt, quant_size_bytes);
     
     freeBMPImage(img);
     appDeInit();

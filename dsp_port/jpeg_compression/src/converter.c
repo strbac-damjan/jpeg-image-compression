@@ -132,6 +132,18 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
 
     quantizeImage(&dctImg, &qImg);
 
+    int16_t *zigzagData = NULL;
+
+    if (dto->zigzag_phy_ptr != 0) {
+        // Map physical address to virtual address
+        zigzagData = (int16_t *)(uintptr_t)appMemShared2TargetPtr(dto->zigzag_phy_ptr);
+    } else {
+        return -4; // Error: No output buffer for ZigZag provided
+    }
+
+    // Call the Zig-Zag function
+    performZigZag(&qImg, zigzagData);
+
     return 0; // Success
 }
 #endif
