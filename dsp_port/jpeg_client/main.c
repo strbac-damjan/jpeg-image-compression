@@ -12,6 +12,7 @@
 // Ensure jpeg_compression.h includes the RLESymbol definition we added earlier
 #include <jpeg_compression.h> 
 #include "bmp_handler.h"
+#include "jpeg_handler.h"
 
 // Definition must match DSP side
 typedef struct {
@@ -59,11 +60,12 @@ int main(int argc, char* argv[])
 {
     int32_t status;
     
-    if (argc < 2) {
-        appLogPrintf("Usage: %s <input_bmp_path>\n", argv[0]);
+    if (argc < 3) {
+        appLogPrintf("Usage: %s <input_bmp_path> <output_jpeg_path>\n", argv[0]);
         return -1;
     }
     const char* inputPath = argv[1];
+    const char* outputPath = argv[2];
     
     // Application Initialization
     appLogPrintf("JPEG: Initializing App...\n");
@@ -294,12 +296,14 @@ int main(int argc, char* argv[])
             }
             printf("\n\n");
             
-            // Check for valid JPEG markers (just heuristics)
-            // A raw bitstream usually needs headers (SOI, DQT, DHT, SOF, SOS) to be a valid .jpg file.
-            // This DSP code outputs the *Entropy Coded Segment* (scan data).
-            // Usually valid scan data doesn't start with specific magic bytes unless headers are added.
-            appLogPrintf("Note: This contains the Entropy Coded Segment (SOS data).\n");
-            appLogPrintf("To view as .jpg, headers (SOI, DQT, DHT, SOF, SOS) must be prepended.\n");
+            bool saved = saveJPEG(outputPath, img->width, img->height, huff_output_virt, dto.huff_size);
+            
+            if (saved) {
+                appLogPrintf("SUCCESS: Image saved!\n");
+            } else {
+                appLogPrintf("ERROR: Failed to save image!\n");
+            }
+
         } else {
             appLogPrintf("ERROR: Huffman size is 0!\n");
         }
