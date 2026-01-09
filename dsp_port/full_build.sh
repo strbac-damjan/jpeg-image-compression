@@ -1,80 +1,56 @@
 #!/bin/bash
 
-# ==============================================================================
-# 1. POSTAVKE I PUTANJE
-# ==============================================================================
+# ==========================================
+# 1. CONFIGURATION (PATHS & NETWORK)
+# ==========================================
 
-PROJECT_ROOT=$(pwd)
-SDK_PATH=$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05
+# Network settings
+TARGET_USER=root
+TARGET_IP=192.168.1.200
 
-# Komponente SDK-a
-CGT7X_ROOT=${SDK_PATH}/psdk_tools/ti-cgt-c7000_4.1.0.LTS
-VISION_APPS_PATH=${SDK_PATH}/vision_apps
-TIOVX_PATH=${SDK_PATH}/tiovx
-APP_UTILS_PATH=${SDK_PATH}/app_utils
+# Host Paths (PC)
+# Adjust this path to the folder where you usually run 'make vision_apps'
+SDK_ROOT="$HOME/ti-processor-sdk-rtos-j721e-evm-09_02_00_05"
+BUILD_DIR="$SDK_ROOT" 
 
-# Provjere postojanja foldera
-if [ ! -d "$CGT7X_ROOT" ]; then echo "GRESKA: Nema kompajlera."; exit 1; fi
-if [ ! -d "$TIOVX_PATH" ]; then echo "GRESKA: Nema TIOVX."; exit 1; fi
+# Target Paths (TDA4)
+TARGET_DIR_FIRMWARE=/lib/firmware/vision_apps_evm
+TARGET_DIR_APPS=/opt/vision_apps
 
-# Provjera za app_utils (posto si rekao da je tu)
-if [ ! -d "$APP_UTILS_PATH" ]; then
-    echo "UPOZORENJE: Ne vidim folder $APP_UTILS_PATH"
-    echo "Provjeri da li se folder zove 'app_utils' u root-u SDK-a."
+# Files to copy (using SDK_ROOT variable for readability)
+BINARIES="
+$SDK_ROOT/vision_apps/out/J721E/R5F/FREERTOS/release/*.out
+$SDK_ROOT/vision_apps/out/J721E/C71/FREERTOS/release/*.out
+$SDK_ROOT/vision_apps/out/J721E/C66/FREERTOS/release/*.out
+"
+
+APPS="
+$SDK_ROOT/vision_apps/out/J721E/A72/LINUX/release/jpeg_client_app.out
+$SDK_ROOT/vision_apps/out/J721E/A72/LINUX/release/jpeg_client_app.out.map"
+
+# ==========================================
+# 2. BUILD PROCESS
+# ==========================================
+
+echo "========================================"
+echo "STARTING BUILD PROCESS"
+echo "========================================"
+
+# Change to build directory
+cd "$BUILD_DIR/sdk_builder" || { echo "ERROR: Could not find build directory $BUILD_DIR"; exit 1; }
+
+# Run make command
+# Added 'time' to see how long the build takes
+echo "Running: make vision_apps -j16 in $(pwd)"
+time make vision_apps -j16
+
+# ERROR CHECK!
+# $? contains the exit code of the last command. 0 means success.
+if [ $? -ne 0 ]; then
+    echo "########################################"
+    echo "       BUILD FAILED! STOPPING."
+    echo "########################################"
+    exit 1
 fi
 
-BUILD_DIR=${PROJECT_ROOT}/build
-
-# ==============================================================================
-# 2. FLAGOVI
-# ==============================================================================
-
-# -DSOC_J721E definise platformu
-CFLAGS="-O3 --gen_opt_info=2 -k --src_interlist --silicon_version=7100 -DSOC_J721E -DTARGET_C71"
-
-# INCLUDE PUTANJE
-# -I ${APP_UTILS_PATH} : Ovo omogucava da #include "utils/ipc/..." radi
-# -I ${VISION_APPS_PATH} : Ovo omogucava da stariji utils rade
-INCLUDES="-I ${PROJECT_ROOT}/jpeg_compression/include \
-          -I ${CGT7X_ROOT}/include \
-          -I ${VISION_APPS_PATH} \
-          -I ${APP_UTILS_PATH}/utils/ipc/include/ \
-          -I ${APP_UTILS_PATH}/utils/remote_service/include/ \
-          -I ${APP_UTILS_PATH}/utils/console_io/include/ \
-          -I ${APP_UTILS_PATH}/utils/mem/include/ \
-          -I ${TIOVX_PATH}/include \
-
-# ==============================================================================
-# 3. IZVRŠAVANJE
-# ==============================================================================
-
-echo "--- Pripremam build folder: ${BUILD_DIR} ---"
-rm -rf ${BUILD_DIR}
-mkdir -p ${BUILD_DIR}
-
-SOURCE_DIR="${PROJECT_ROOT}/jpeg_compression/src"
-SOURCES=$(find ${SOURCE_DIR} -name "*.c")
-
-echo "--- Pocetak kompilacije ---"
-echo "SDK: $SDK_PATH"
-echo "Dodajem APP_UTILS: $APP_UTILS_PATH"
-
-for SRC in $SOURCES; do
-    FILENAME=$(basename "$SRC")
-    
-    echo "Analiziram: $FILENAME"
-    
-    "${CGT7X_ROOT}/bin/cl7x" $CFLAGS $INCLUDES \
-        -fr="${BUILD_DIR}" \
-        -fs="${BUILD_DIR}" \
-        "$SRC"
-        
-    if [ $? -eq 0 ]; then
-        echo "   [OK] -> ${BUILD_DIR}/${FILENAME%.*}.asm"
-    else
-        echo "   [GRESKA] Neuspjesna kompilacija."
-    fi
-    echo "---------------------------"
-done
-
-echo "Gotovo. Provjeri 'build/dct.asm'."
+echo "Build successful! "
