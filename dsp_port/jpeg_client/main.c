@@ -2,6 +2,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h> // for abs, etc.
 #include <TI/tivx.h>
 #include <utils/ipc/include/app_ipc.h>
 #include <utils/remote_service/include/app_remote_service.h>
@@ -9,10 +10,10 @@
 #include <utils/console_io/include/app_log.h>
 #include <utils/mem/include/app_mem.h> 
 
-// Ensure jpeg_compression.h includes the RLESymbol definition we added earlier
+// Ensure jpeg_compression.h includes the RLESymbol definition
 #include <jpeg_compression.h> 
 #include "bmp_handler.h"
-#include "jpeg_handler.h"
+#include "jpeg_handler.h" // Koristimo novi header za upis bitstreama
 
 // Definition must match DSP side
 typedef struct {
@@ -21,9 +22,7 @@ typedef struct {
     uint16_t code;     // The amplitude value (variable length bits)
 } RLESymbol;
 
-/* * DTO structure shared between A72 (Host) and C7x (DSP).
- * This definition must match the one in the DSP source code exactly.
- */
+/* DTO structure shared between A72 (Host) and C7x (DSP). */
 typedef struct JPEG_COMPRESSION_DTO
 {
     int32_t width;
@@ -56,6 +55,11 @@ typedef struct JPEG_COMPRESSION_DTO
 
 } JPEG_COMPRESSION_DTO;
 
+// Helper function to align dimensions to next multiple of 8 (MCU size)
+int32_t align8(int32_t x) {
+    return (x + 7) & ~7;
+}
+
 int main(int argc, char* argv[])
 {
     int32_t status;
@@ -75,7 +79,6 @@ int main(int argc, char* argv[])
         appLogPrintf("JPEG: App initialization failed!\n");
         return 1;
     }
-    appLogPrintf("JPEG: App initialization successful!\n");
 
     // Load BMP image
     appLogPrintf("JPEG: Loading BMP image...\n");
@@ -86,51 +89,115 @@ int main(int argc, char* argv[])
         appDeInit(); 
         return 1;
     }
-    appLogPrintf("JPEG: BMP image loaded (Width: %d, Height: %d)!\n", img->width, img->height);
-
-    uint32_t pixel_count = img->width * img->height;
+    
+    /* -------------------------------------------------------------------------
+     * 1. CALCULATE ALIGNED DIMENSIONS (PADDING)
+     * -------------------------------------------------------------------------
+     */
+    int32_t orig_w = img->width;
+    int32_t orig_h = img->height;
+    
+    // Align to multiple of 8 (JPEG MCU size)
+    int32_t aligned_w = align8(orig_w);
+    int32_t aligned_h = align8(orig_h);
+    
+    uint32_t aligned_pixel_count = aligned_w * aligned_h;
+    
+    appLogPrintf("JPEG: Image Loaded: %dx%d\n", orig_w, orig_h);
+    appLogPrintf("JPEG: Padded Dimensions for DSP: %dx%d (Total pixels: %d)\n", 
+                 aligned_w, aligned_h, aligned_pixel_count);
 
     /* -------------------------------------------------------------------------
-     * Allocate output buffers in Shared Memory
+     * 2. ALLOCATE & PREPARE INPUT BUFFERS (PADDED)
+     * -------------------------------------------------------------------------
+     */
+    // We allocate new buffers for Input so we can pad the edges properly.
+    uint8_t* r_padded = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, aligned_pixel_count, 64);
+    uint8_t* g_padded = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, aligned_pixel_count, 64);
+    uint8_t* b_padded = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, aligned_pixel_count, 64);
+
+    if (!r_padded || !g_padded || !b_padded) {
+        appLogPrintf("JPEG: Failed to allocate input padding buffers!\n");
+        // Free and exit logic...
+        freeBMPImage(img);
+        appDeInit();
+        return 1;
+    }
+
+    // Copy data with Edge Extension (Clamping)
+    // This fills the extra pixels (padding) with the value of the last valid pixel
+    // to prevent artifacts at the bottom/right edges.
+    for (int y = 0; y < aligned_h; y++) {
+        // Clamp Y to valid range [0, orig_h - 1]
+        int src_y = (y < orig_h) ? y : (orig_h - 1);
+        
+        for (int x = 0; x < aligned_w; x++) {
+            // Clamp X to valid range [0, orig_w - 1]
+            int src_x = (x < orig_w) ? x : (orig_w - 1);
+            
+            int src_idx = src_y * orig_w + src_x;
+            int dst_idx = y * aligned_w + x; // Padded buffer has wider stride
+            
+            r_padded[dst_idx] = img->r[src_idx];
+            g_padded[dst_idx] = img->g[src_idx];
+            b_padded[dst_idx] = img->b[src_idx];
+        }
+    }
+
+    // Flush Input Cache
+    appMemCacheWb(r_padded, aligned_pixel_count);
+    appMemCacheWb(g_padded, aligned_pixel_count);
+    appMemCacheWb(b_padded, aligned_pixel_count);
+
+    /* -------------------------------------------------------------------------
+     * 3. ALLOCATE OUTPUT BUFFERS (BASED ON ALIGNED SIZE)
      * -------------------------------------------------------------------------
      */
     
     // A) Y Component Buffer
-    uint8_t* y_output_virt = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, pixel_count, 64);
+    uint8_t* y_output_virt = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, aligned_pixel_count, 64);
     
     // B) DCT Coefficients Buffer
-    uint32_t dct_size_bytes = pixel_count * sizeof(float);
+    uint32_t dct_size_bytes = aligned_pixel_count * sizeof(float);
     float* dct_output_virt = (float*)appMemAlloc(APP_MEM_HEAP_DDR, dct_size_bytes, 64);
 
     // C) Quantized Coefficients Buffer
-    uint32_t quant_size_bytes = pixel_count * sizeof(int16_t);
+    uint32_t quant_size_bytes = aligned_pixel_count * sizeof(int16_t);
     int16_t* quant_output_virt = (int16_t*)appMemAlloc(APP_MEM_HEAP_DDR, quant_size_bytes, 64);
     
     // D) ZigZag Scanned Buffer
     int16_t* zigzag_output_virt = (int16_t*)appMemAlloc(APP_MEM_HEAP_DDR, quant_size_bytes, 64);
 
     // E) RLE Output Buffer
-    uint32_t rle_size_bytes = pixel_count * sizeof(RLESymbol);
+    uint32_t rle_size_bytes = aligned_pixel_count * sizeof(RLESymbol);
     RLESymbol* rle_output_virt = (RLESymbol*)appMemAlloc(APP_MEM_HEAP_DDR, rle_size_bytes, 64);
 
     // F) Huffman Output Buffer (Final Bitstream)
-    // Allocating pixel_count bytes is safe (compressed is usually much smaller)
-    uint32_t huff_capacity_bytes = pixel_count; 
+    uint32_t huff_capacity_bytes = aligned_pixel_count; 
     uint8_t* huff_output_virt = (uint8_t*)appMemAlloc(APP_MEM_HEAP_DDR, huff_capacity_bytes, 64);
 
     // Check allocations
     if (!y_output_virt || !dct_output_virt || !quant_output_virt || !zigzag_output_virt || !rle_output_virt || !huff_output_virt) {
         appLogPrintf("JPEG: Failed to allocate output memory!\n");
-        // Free everything (simplified logic)
-        if(y_output_virt) appMemFree(APP_MEM_HEAP_DDR, y_output_virt, pixel_count);
-        // ... (other frees omitted for brevity in snippet, but include in real code)
+        // Free everything
+        if(r_padded) appMemFree(APP_MEM_HEAP_DDR, r_padded, aligned_pixel_count);
+        if(g_padded) appMemFree(APP_MEM_HEAP_DDR, g_padded, aligned_pixel_count);
+        if(b_padded) appMemFree(APP_MEM_HEAP_DDR, b_padded, aligned_pixel_count);
+        
+        if(y_output_virt) appMemFree(APP_MEM_HEAP_DDR, y_output_virt, aligned_pixel_count);
+        if(dct_output_virt) appMemFree(APP_MEM_HEAP_DDR, dct_output_virt, dct_size_bytes);
+        if(quant_output_virt) appMemFree(APP_MEM_HEAP_DDR, quant_output_virt, quant_size_bytes);
+        if(zigzag_output_virt) appMemFree(APP_MEM_HEAP_DDR, zigzag_output_virt, quant_size_bytes);
+        if(rle_output_virt) appMemFree(APP_MEM_HEAP_DDR, rle_output_virt, rle_size_bytes);
+        if(huff_output_virt) appMemFree(APP_MEM_HEAP_DDR, huff_output_virt, huff_capacity_bytes);
+
         freeBMPImage(img);
         appDeInit();
         return 1;
     }
 
     // Initialize buffers to zero
-    memset(y_output_virt, 0, pixel_count);
+    memset(y_output_virt, 0, aligned_pixel_count);
     memset(dct_output_virt, 0, dct_size_bytes);
     memset(quant_output_virt, 0, quant_size_bytes);
     memset(zigzag_output_virt, 0, quant_size_bytes);
@@ -138,7 +205,7 @@ int main(int argc, char* argv[])
     memset(huff_output_virt, 0, huff_capacity_bytes);
 
     // Perform Cache Write-back to flush zeros to DDR
-    appMemCacheWb(y_output_virt, pixel_count);
+    appMemCacheWb(y_output_virt, aligned_pixel_count);
     appMemCacheWb(dct_output_virt, dct_size_bytes);
     appMemCacheWb(quant_output_virt, quant_size_bytes);
     appMemCacheWb(zigzag_output_virt, quant_size_bytes);
@@ -146,20 +213,21 @@ int main(int argc, char* argv[])
     appMemCacheWb(huff_output_virt, huff_capacity_bytes);
 
     /* -------------------------------------------------------------------------
-     * Prepare DTO for IPC
+     * 4. PREPARE DTO FOR IPC
      * -------------------------------------------------------------------------
      */
     appLogPrintf("JPEG: Preparing data for DSP...\n");
     JPEG_COMPRESSION_DTO dto;
     memset(&dto, 0, sizeof(dto));
     
-    dto.width = img->width;
-    dto.height = img->height;
+    // IMPORTANT: Send ALIGNED dimensions to DSP
+    dto.width = aligned_w;
+    dto.height = aligned_h;
 
-    // Convert Virtual addresses to Physical addresses
-    dto.r_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)img->r, APP_MEM_HEAP_DDR);
-    dto.g_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)img->g, APP_MEM_HEAP_DDR);
-    dto.b_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)img->b, APP_MEM_HEAP_DDR);
+    // Use PADDED input buffer addresses
+    dto.r_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)r_padded, APP_MEM_HEAP_DDR);
+    dto.g_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)g_padded, APP_MEM_HEAP_DDR);
+    dto.b_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)b_padded, APP_MEM_HEAP_DDR);
     
     dto.y_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)y_output_virt, APP_MEM_HEAP_DDR);
     dto.dct_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)dct_output_virt, APP_MEM_HEAP_DDR);
@@ -169,12 +237,11 @@ int main(int argc, char* argv[])
     dto.rle_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)rle_output_virt, APP_MEM_HEAP_DDR);
     dto.rle_count = 0; 
 
-    // Huffman Setup
     dto.huff_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)huff_output_virt, APP_MEM_HEAP_DDR);
     dto.huff_size = 0;
 
     /* -------------------------------------------------------------------------
-     * Send command via Remote Service
+     * 5. RUN DSP PROCESS
      * -------------------------------------------------------------------------
      */
     appLogPrintf("JPEG: Sending data via Remote Service...\n");
@@ -195,111 +262,36 @@ int main(int argc, char* argv[])
     {
         appLogPrintf("JPEG: DSP Processing Done! Verifying results...\n");
         
-        /* -------------------------------------------------------------------------
-         * Invalidate Cache & Verify Results
-         * -------------------------------------------------------------------------
-         */
-
-        appMemCacheInv(y_output_virt, pixel_count);
+        // Invalidate caches to read results from DDR
+        appMemCacheInv(y_output_virt, aligned_pixel_count);
         appMemCacheInv(dct_output_virt, dct_size_bytes);
         appMemCacheInv(quant_output_virt, quant_size_bytes);
         appMemCacheInv(zigzag_output_virt, quant_size_bytes);
         appMemCacheInv(rle_output_virt, rle_size_bytes);
-        // Important: Invalidate Huffman buffer to see DSP results
         appMemCacheInv(huff_output_virt, huff_capacity_bytes); 
 
-        // --- Verify Y Component ---
-        appLogPrintf("\n--------------------------------------------------\n");
-        appLogPrintf("1. Y Component (First 8x8 Block - Linear View):\n");
-        appLogPrintf("--------------------------------------------------\n");
+        // --- Verify Y Component (First 8x8) ---
+        appLogPrintf("Y Component check (First row):\n");
         int8_t* signed_y = (int8_t*)y_output_virt;
-        for (int i = 0; i < 64 && i < pixel_count; i++) {
-            if (i % 8 == 0) printf("\nRow %d: ", i/8);
-            printf("%4d ", signed_y[i]); 
-        }
+        for (int i = 0; i < 8; i++) printf("%4d ", signed_y[i]); 
         printf("\n");
 
-        // --- Verify DCT Coefficients ---
+        // --- HUFFMAN OUTPUT & SAVE ---
         appLogPrintf("\n--------------------------------------------------\n");
-        appLogPrintf("2. DCT Coefficients (First 8x8 Block):\n");
-        appLogPrintf("--------------------------------------------------\n");
-        for (int row = 0; row < 8; row++) {
-            printf("\nRow %d: ", row);
-            for (int col = 0; col < 8; col++) {
-                int idx = row * img->width + col;
-                if (idx < pixel_count) {
-                    printf("%7.2f ", dct_output_virt[idx]);
-                }
-            }
-        }
-        printf("\n");
-
-        // --- Verify Quantized Coefficients ---
-        appLogPrintf("\n--------------------------------------------------\n");
-        appLogPrintf("3. Quantized Coefficients (First 8x8 Block):\n");
-        appLogPrintf("--------------------------------------------------\n");
-        for (int row = 0; row < 8; row++) {
-            printf("\nRow %d: ", row);
-            for (int col = 0; col < 8; col++) {
-                int idx = row * img->width + col;
-                if (idx < pixel_count) {
-                    printf("%4d ", quant_output_virt[idx]);
-                }
-            }
-        }
-        printf("\n");
-
-        // --- Verify Zig-Zag Output ---
-        appLogPrintf("\n--------------------------------------------------\n");
-        appLogPrintf("4. Zig-Zag Output (First 8x8 Block - Linearized):\n");
-        appLogPrintf("--------------------------------------------------\n");
-        for (int i = 0; i < 64; i++) {
-            if (i % 8 == 0) printf("\nLine %d: ", i/8);
-            printf("%4d ", zigzag_output_virt[i]);
-        }
-        printf("\n");
-
-        // --- Verify RLE Output ---
-        appLogPrintf("\n--------------------------------------------------\n");
-        appLogPrintf("5. RLE Output (Total Symbols Generated: %d)\n", dto.rle_count);
-        appLogPrintf("--------------------------------------------------\n");
-        
-        if (dto.rle_count == 0) {
-            appLogPrintf("WARNING: RLE count is 0. Something went wrong on DSP.\n");
-        } else {
-            int limit = (dto.rle_count < 20) ? dto.rle_count : 20;
-            for (int i = 0; i < limit; i++) {
-                RLESymbol s = rle_output_virt[i];
-                uint8_t run = s.symbol >> 4;
-                uint8_t size = s.symbol & 0x0F;
-                printf("[%3d] Sym:0x%02X (Run:%2d, Size:%2d) Code:%5d (Bits:%d)\n", 
-                       i, s.symbol, run, size, s.code, s.codeBits);
-            }
-        }
-        printf("\n");
-
-        // --- Verify Huffman Output ---
-        appLogPrintf("\n--------------------------------------------------\n");
-        appLogPrintf("6. HUFFMAN Output (FINAL BITSTREAM)\n");
-        appLogPrintf("--------------------------------------------------\n");
-        appLogPrintf("Original Size   : %d bytes (Y-Grayscale)\n", pixel_count);
+        appLogPrintf("HUFFMAN Output (FINAL BITSTREAM)\n");
         appLogPrintf("Compressed Size : %d bytes\n", dto.huff_size);
         
         if(dto.huff_size > 0) {
-            float ratio = (float)pixel_count / (float)dto.huff_size;
+            float ratio = (float)orig_w * orig_h / (float)dto.huff_size;
             appLogPrintf("Compression Ratio: %.2f : 1\n", ratio);
             
-            appLogPrintf("\nHex Dump of Compressed Data (First 64 bytes):\n");
-            for (int i = 0; i < 64 && i < dto.huff_size; i++) {
-                if (i % 16 == 0) printf("\n%04X: ", i);
-                printf("%02X ", huff_output_virt[i]);
-            }
-            printf("\n\n");
-            
-            bool saved = saveJPEG(outputPath, img->width, img->height, huff_output_virt, dto.huff_size);
+            // IMPORTANT: Save using ORIGINAL dimensions.
+            // The bitstream contains padded data (e.g. for 856px height), 
+            // but the header will say 853px. Decoders handle this by cropping.
+            bool saved = saveJPEG(outputPath, orig_w, orig_h, huff_output_virt, dto.huff_size);
             
             if (saved) {
-                appLogPrintf("SUCCESS: Image saved!\n");
+                appLogPrintf("SUCCESS: Image saved to %s\n", outputPath);
             } else {
                 appLogPrintf("ERROR: Failed to save image!\n");
             }
@@ -307,12 +299,19 @@ int main(int argc, char* argv[])
         } else {
             appLogPrintf("ERROR: Huffman size is 0!\n");
         }
+        appLogPrintf("--------------------------------------------------\n");
     }
 
     // Cleanup resources
     appLogPrintf("JPEG: Cleaning up...\n");
     
-    if(y_output_virt) appMemFree(APP_MEM_HEAP_DDR, y_output_virt, pixel_count);
+    // Free PADDED input buffers
+    appMemFree(APP_MEM_HEAP_DDR, r_padded, aligned_pixel_count);
+    appMemFree(APP_MEM_HEAP_DDR, g_padded, aligned_pixel_count);
+    appMemFree(APP_MEM_HEAP_DDR, b_padded, aligned_pixel_count);
+
+    // Free Output buffers
+    if(y_output_virt) appMemFree(APP_MEM_HEAP_DDR, y_output_virt, aligned_pixel_count);
     if(dct_output_virt) appMemFree(APP_MEM_HEAP_DDR, dct_output_virt, dct_size_bytes);
     if(quant_output_virt) appMemFree(APP_MEM_HEAP_DDR, quant_output_virt, quant_size_bytes);
     if(zigzag_output_virt) appMemFree(APP_MEM_HEAP_DDR, zigzag_output_virt, quant_size_bytes);
