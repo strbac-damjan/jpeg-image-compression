@@ -35,18 +35,27 @@ typedef struct {
                          // Values 0-255 (where 0=black, 255=white)
 } YImage;
 
+typedef struct {
+    int width;
+    int height;
+    float *coefficients; // Width * Height
+} DCTImage;
+
 typedef struct JPEG_COMPRESSION_DTO
 {
     int32_t width;
     int32_t height;
     
-    // Physical addresses of input channels (R, G, B)
+    // Input RGB Physical Addresses
     uint64_t r_phy_ptr;
     uint64_t g_phy_ptr;
     uint64_t b_phy_ptr;
 
-    // Physical address of the output buffer (Y)
+    // Output Y Physical Address (Intermediate)
     uint64_t y_phy_ptr;
+    
+    // Output DCT Coefficients Physical Address (Final)
+    uint64_t dct_phy_ptr; 
 } JPEG_COMPRESSION_DTO;
 
 // -------------------------------------------------------------------------------------
@@ -81,6 +90,10 @@ int32_t JpegCompression_Init();
  * \param y_out  Pointer to the destination Y-component structure.
  */
 void extractYComponent(BMPImage *img, YImage *y_out);
+
+
+void computeDCT(YImage *y_img, DCTImage *dct_out);
+
 /**
  * \brief Main entry point for the DSP processing task.
  * * Receives the Data Transfer Object (DTO) containing physical addresses from the A72 core,
