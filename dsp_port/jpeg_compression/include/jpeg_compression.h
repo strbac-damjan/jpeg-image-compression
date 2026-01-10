@@ -14,7 +14,8 @@
 #include <utils/mem/include/app_mem.h>
 #include <c7x.h>
 
-
+#define MACRO_BLOCK_WIDTH 32
+#define BLOCK_SIZE 8
 #define JPEG_COMPRESSION_REMOTE_SERVICE_NAME "com.etfbl.sdos.jpeg_compression"
 
 // -------------------------------------------------------------------------------------
@@ -136,6 +137,18 @@ int32_t performHuffman(RLESymbol *rleData, int32_t numSymbols, uint8_t *outBuffe
  * maps them to the DSP's local virtual address space, and triggers the conversion.
  */
 int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto);
+
+
+
+void extractYComponentBlock32x8(BMPImage *img, int32_t start_x, int32_t start_y, int8_t *macro_buffer);
+
+void computeDCTBlock(int8_t *src_data, float *dct_out, int32_t stride);
+
+void quantizeBlock(float *dct_block, int16_t *quant_block);
+
+void performZigZagBlock(int16_t *quant_block, int16_t *zigzag_block);
+
+int32_t performRLEBlock(int16_t *block, RLESymbol *rle_out, int32_t max_capacity, int16_t *last_dc_ptr);
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------

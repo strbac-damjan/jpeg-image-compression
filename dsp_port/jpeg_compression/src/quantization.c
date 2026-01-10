@@ -1,16 +1,14 @@
 #ifdef __C7000__
 #include "jpeg_compression.h"
 #include <math.h>
+#include <c7x.h>
 
 /* -------------------------------------------------------------------------------------
  * QUANTIZATION CONSTANTS
  * -------------------------------------------------------------------------------------
  */
 
-/* * Reciprocal Luminance Quantization Table
- * Values are pre-calculated as (1.0f / Standard_Table_Value).
- * This allows us to use fast multiplication instead of slow division on the DSP.
- */
+/* Reciprocal Luminance Quantization Table (Linear 64 elements) */
 static const float RECIP_LUMINANCE_QUANT_TBL[64] = {
     0.062500f, 0.090909f, 0.100000f, 0.062500f, 0.041667f, 0.025000f, 0.019608f, 0.016393f,
     0.083333f, 0.083333f, 0.071429f, 0.052632f, 0.038462f, 0.017241f, 0.016667f, 0.018182f,
@@ -23,54 +21,31 @@ static const float RECIP_LUMINANCE_QUANT_TBL[64] = {
 };
 
 /**
- * \brief Quantizes DCT coefficients using the luminance table.
- * * Performs element-wise multiplication with the reciprocal quantization table
- * and rounds to the nearest integer.
- * * \param dct_img  Input image with DCT coefficients (float).
- * \param q_img    Output image with quantized coefficients (int16_t).
+ * \brief Quantizes a single 8x8 DCT block.
+ * * Takes a linear array of 64 floats (from DCT), multiplies by the reciprocal
+ * quantization table, and rounds to int16.
+ *
+ * \param dct_block    Input: Linear array of 64 floats (L1 memory)
+ * \param quant_block  Output: Linear array of 64 int16_t (L1 memory)
  */
-void quantizeImage(DCTImage *dct_img, QuantizedImage *q_img)
-{
-    int width = dct_img->width;
-    int height = dct_img->height;
-    
-    float *srcData = dct_img->coefficients;
-    int16_t *dstData = q_img->data;
-
-    int y, x, i, j;
-
-    // Process the image in 8x8 blocks
-    for (y = 0; y <= height - 8; y += 8)
+void quantizeBlock(float *dct_block, int16_t *quant_block)
+{   
+    int i;
+    // C7x Optimization Hint:
+    // Inform compiler that we are processing exactly 64 elements.
+    // This allows it to generate optimal SIMD instructions without loop overhead code.
+    //#pragma MUST_ITERATE(64, 64, 64)
+    for ( i = 0; i < 64; i++) 
     {
-        for (x = 0; x <= width - 8; x += 8)
-        {
-            // Iterate inside the 8x8 block
-            for (i = 0; i < 8; i++) 
-            {
-                // Calculate pointers to the start of the current row in the image
-                float *blockRowSrc = &srcData[(y + i) * width + x];
-                int16_t *blockRowDst = &dstData[(y + i) * width + x];
-                
-                // Pointer to the current row in the 8x8 quantization table
-                const float *tblRow = &RECIP_LUMINANCE_QUANT_TBL[i * 8];
-
-                // Unroll loop for SIMD optimization (8 pixels per vector)
-                #pragma UNROLL(8)
-                for (j = 0; j < 8; j++) 
-                {
-                    float dctVal = blockRowSrc[j];
-                    float recipQ = tblRow[j];
-                    
-                    // Multiply by reciprocal (faster than division)
-                    float scaled = dctVal * recipQ;
-                    
-                    // Round to nearest integer:
-                    // roundf is typically mapped to an efficient intrinsic on C7x.
-                    // Casting to (int16_t) handles the storage type.
-                    blockRowDst[j] = (int16_t)roundf(scaled);
-                }
-            }
-        }
+        float dctVal = dct_block[i];
+        float recipQ = RECIP_LUMINANCE_QUANT_TBL[i];
+        
+        // Math: val * (1/Q)
+        float scaled = dctVal * recipQ;
+        
+        // Rounding
+        // roundf maps to efficient hardware instructions.
+        quant_block[i] = (int16_t)roundf(scaled);
     }
 }
 #endif

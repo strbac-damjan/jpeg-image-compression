@@ -1,77 +1,85 @@
 #ifdef __C7000__
-/* TI C7x DSP Intrinsic definitions */
-#include <c7x.h>
-/* Memory utility for address translation (Shared -> Target) */
-#include <utils/mem/include/app_mem.h> 
-/* Project specific headers */
-#include <jpeg_compression.h>
-#include <stdio.h> 
+#include "jpeg_compression.h"
 
-/**
- * \brief Extracts the Luminance (Y) component and performs Level Shifting (Centering).
- * * This function converts RGB input to Luminance (Y) and then subtracts 128 
- * to center the data around zero. This level shifting is a required step 
- * before Discrete Cosine Transform (DCT) to reduce dynamic range requirements.
- * * Formula: Y_centered = ((77*R + 150*G + 29*B) >> 8) - 128
- * resulting in a range of [-128, 127].
- *
- * \param img    Pointer to the source BMP image structure.
- * \param y_out  Pointer to the destination Y-component structure.
+/* * Standard JPEG Conversion Coefficients (scaled by 256 for integer math)
+ * Y = 0.299*R + 0.587*G + 0.114*B
+ * * Scaled:
+ * Y = (77*R + 150*G + 29*B) >> 8
  */
-void extractYComponent(BMPImage *img, YImage *y_out) 
+#define COEFF_R 77
+#define COEFF_G 150
+#define COEFF_B 29
+
+void extractYComponentBlock32x8(BMPImage *img, int32_t startX, int32_t startY, int8_t *outputBuffer)
 {
-    int32_t total_pixels = img->width * img->height;
+    /* 1. DECLARATIONS (C89 compliant) */
+    int i;
+    int32_t width = img->width;
     
-    // Process 32 pixels per vector iteration
-    int32_t num_vectors = total_pixels / 32;
-    int32_t i; 
+    /* Input pointers (uint8_t) */
+    uint8_t *rPtrBase = img->r + (startY * width + startX);
+    uint8_t *gPtrBase = img->g + (startY * width + startX);
+    uint8_t *bPtrBase = img->b + (startY * width + startX);
 
-    /* Input Pointer Setup (Unsigned 8-bit vectors) */
-    uchar32 * restrict vec_r = (uchar32 *) img->r;
-    uchar32 * restrict vec_g = (uchar32 *) img->g;
-    uchar32 * restrict vec_b = (uchar32 *) img->b;
+    /* Output pointer (int8_t) */
+    int8_t *dstPtr = outputBuffer;
+
+    /* Vector registers */
+    uchar32 vR, vG, vB;      /* Input pixels (0..255) */
+    short32 vR_s, vG_s, vB_s; /* Promoted to short for multiplication */
+    short32 vY_s;            /* Calculated Y in short precision */
+    char32  vY_out;          /* Final result (-128..127) */
     
-    /* Output Pointer Setup (Signed 8-bit vector)
-     * The destination is cast to char32* because the result of the level 
-     * shifting is a signed value [-128, 127]. This matches the return type 
-     * of the pack instructions used later.
-     */
-    char32 * restrict vec_y = (char32 *) y_out->data;
+    /* Constants vectors */
+    short32 vCoeffR = (short32)COEFF_R;
+    short32 vCoeffG = (short32)COEFF_G;
+    short32 vCoeffB = (short32)COEFF_B;
+    short32 vOffset = (short32)128; /* For level shifting (-128) */
 
-    /* Coefficient Initialization for RGB to Y conversion */
-    short32 coeff_r = (short32) 77;
-    short32 coeff_g = (short32) 150;
-    short32 coeff_b = (short32) 29;
-    
-    /* Offset for Level Shifting */
-    short32 val_128 = (short32) 128;
+    /* 2. LOOP over 8 rows */
+    /* We process 32 pixels width at once per iteration */
+    #pragma MUST_ITERATE(8, 8, 8)
+    for (i = 0; i < 8; i++)
+    {
+        /* * LOAD (Vector Load) 
+         * Casting pointer to (uchar32*) tells the compiler to load 32 bytes 
+         * into a vector register. C7x handles unaligned loads automatically.
+         */
+        vR = *((uchar32 *)(rPtrBase + i * width));
+        vG = *((uchar32 *)(gPtrBase + i * width));
+        vB = *((uchar32 *)(bPtrBase + i * width));
 
-    /* Vectorized Loop */
-    for (i = 0; i < num_vectors; i++) {
-        // Load Data from input channels
-        uchar32 r_in = vec_r[i];
-        uchar32 g_in = vec_g[i];
-        uchar32 b_in = vec_b[i];
+        /* * CONVERT & CALCULATE
+         * 1. Convert uchar (8-bit) to short (16-bit) to prevent overflow during multiply 
+         */
+        vR_s = __convert_short32(vR);
+        vG_s = __convert_short32(vG);
+        vB_s = __convert_short32(vB);
 
-        // Unpack 8-bit data to 16-bit to prevent overflow during multiplication
-        short32 r_s = convert_short32(r_in);
-        short32 g_s = convert_short32(g_in);
-        short32 b_s = convert_short32(b_in);
+        /* * 2. Calculate Y = (77*R + 150*G + 29*B) 
+         * Note: Operations are element-wise automatically on vector types
+         */
+        vY_s = (vR_s * vCoeffR) + (vG_s * vCoeffG) + (vB_s * vCoeffB);
 
-        // Calculate Y component (Matrix multiplication equivalent)
-        short32 y_temp = (r_s * coeff_r) + (g_s * coeff_g) + (b_s * coeff_b);
+        /* * 3. Shift right by 8 (divide by 256) 
+         */
+        vY_s = vY_s >> 8;
 
-        // Normalize the result to 8-bit range [0, 255]
-        y_temp = y_temp >> 8;
-        
-        // Apply Level Shifting
-        // Subtracts 128 to move range from [0, 255] to [-128, 127]
-        y_temp = y_temp - val_128;
+        /* * 4. Level Shift (JPEG requires -128 offset, so range becomes -128..127)
+         * We subtract 128.
+         */
+        vY_s = vY_s - vOffset;
 
-        // Pack 16-bit data back to 8-bit signed vector and store
-        // convert_char32 handles the conversion to signed 8-bit elements.
-        vec_y[i] = convert_char32(y_temp);
+        /* * 5. Convert back to 8-bit (signed char)
+         * __convert_char32 handles clamping/truncation if necessary
+         */
+        vY_out = __convert_char32(vY_s);
+
+        /* * STORE
+         * Write 32 bytes to the linear macro buffer.
+         * The buffer is 32x8, so row 0 is at offset 0, row 1 at 32, etc.
+         */
+        *((char32 *)(dstPtr + i * 32)) = vY_out;
     }
 }
-
 #endif

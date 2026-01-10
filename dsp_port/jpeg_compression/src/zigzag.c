@@ -1,9 +1,13 @@
 #ifdef __C7000__
 #include "jpeg_compression.h"
+#include <c7x.h>
 
 /* -------------------------------------------------------------------------------------
  * ZIG-ZAG LOOKUP TABLE
  * -------------------------------------------------------------------------------------
+ * Maps the output index (0..63) to the input Raster index (0..63).
+ * e.g. ZIGZAG_ORDER[1] = 1 (horizontal neighbor)
+ * ZIGZAG_ORDER[2] = 8 (vertical neighbor)
  */
 static const uint8_t ZIGZAG_ORDER[64] = {
     0, 1, 8, 16, 9, 2, 3, 10,
@@ -17,53 +21,27 @@ static const uint8_t ZIGZAG_ORDER[64] = {
 };
 
 /**
- * \brief Performs Zig-Zag scanning on quantized image blocks.
- * * Reads data from the quantized 2D image (raster order) and writes it 
- * into a linear buffer where each 64-element chunk represents one 8x8 block
- * sorted in Zig-Zag order.
- * * \param q_img      Input quantized image structure.
- * \param zigzag_out Pointer to the output buffer (linear int16_t array).
+ * \brief Performs Zig-Zag reordering on a single 8x8 block.
+ * * Transforms data from Raster Order (Row-by-Row) to ZigZag Order.
+ * * Since inputs are in L1 memory, this is effectively a "Gather" operation.
+ *
+ * \param quant_block   Input: Linear array of 64 int16_t (Raster Order)
+ * \param zigzag_block  Output: Linear array of 64 int16_t (ZigZag Order)
  */
-void performZigZag(QuantizedImage *q_img, int16_t *zigzag_out)
+void performZigZagBlock(int16_t *quant_block, int16_t *zigzag_block)
 {
-    int width = q_img->width;
-    int height = q_img->height;
-    int16_t *srcData = q_img->data;
-    
-    // Total number of blocks counter
-    int blockIndex = 0;
-    
-    int blockY, blockX;
     int i;
-
-    // Loop through the image in 8x8 blocks
-    for (blockY = 0; blockY < height; blockY += 8)
+    // Inform the compiler about the loop structure
+    // #pragma MUST_ITERATE(64, 64, 64)
+    for (i = 0; i < 64; i++)
     {
-        for (blockX = 0; blockX < width; blockX += 8)
-        {
-            // Calculate the starting address for this block in the output buffer
-            int16_t *blockOutputPtr = &zigzag_out[blockIndex * 64];
-
-            // Iterate 0..63 for the current block
-            for (i = 0; i < 64; i++)
-            {
-                // Get the ZigZag coordinate index from the table
-                int zzPos = ZIGZAG_ORDER[i];
-                
-                // Convert 1D ZigZag index (0-63) to 2D local coordinates (0-7, 0-7)
-                int localRow = zzPos / 8; 
-                int localCol = zzPos % 8; 
-
-                // Calculate the index in the source image (Raster Scan)
-                // Source Index = (CurrentBlockRow + localRow) * Width + (CurrentBlockCol + localCol)
-                int srcIndex = (blockY + localRow) * width + (blockX + localCol);
-
-                // Copy the value
-                blockOutputPtr[i] = srcData[srcIndex];
-            }
-
-            blockIndex++;
-        }
+        // 1. Get the source index from the Lookup Table
+        // This eliminates all complex 2D math (/, %, *)
+        uint8_t src_idx = ZIGZAG_ORDER[i];
+        
+        // 2. Copy the value
+        // The compiler will likely generate a "Gather" instruction or optimized loads
+        zigzag_block[i] = quant_block[src_idx];
     }
 }
 #endif
