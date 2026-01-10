@@ -59,24 +59,31 @@ typedef struct JPEG_COMPRESSION_DTO
     int32_t width;
     int32_t height;
     
-    // Inputs (R, G, B)
+    // Inputs
     uint64_t r_phy_ptr;
     uint64_t g_phy_ptr;
     uint64_t b_phy_ptr;
 
-    // Intermediate
+    // Intermediate buffers
     uint64_t y_phy_ptr;
     uint64_t dct_phy_ptr;
     uint64_t quant_phy_ptr;
     uint64_t zigzag_phy_ptr;
 
-    // RLE Output (Input to Huffman)
+    // Outputs
     uint64_t rle_phy_ptr;
-    uint32_t rle_count; // Number of symbols
+    uint32_t rle_count;
+    uint64_t huff_phy_ptr; 
+    uint32_t huff_size;
 
-    // Huffman Output (Final Bitstream)
-    uint64_t huff_phy_ptr; // NEW
-    uint32_t huff_size;    // NEW: Output size in bytes
+    // --- PROFILING DATA (Cycles) ---
+    uint64_t cycles_color_conversion;
+    uint64_t cycles_dct;
+    uint64_t cycles_quantization;
+    uint64_t cycles_zigzag;
+    uint64_t cycles_rle;
+    uint64_t cycles_huffman;
+    uint64_t cycles_total; // Ukupno vrijeme obrade na DSP-u
 
 } JPEG_COMPRESSION_DTO;
 // -------------------------------------------------------------------------------------
