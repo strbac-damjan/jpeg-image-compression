@@ -59,48 +59,93 @@ typedef struct JPEG_COMPRESSION_DTO
 
 } JPEG_COMPRESSION_DTO;
 
-// Helper function to align dimensions to next multiple of 8
+// Helper function to align dimensions to next multiple of 32 (Macro Block Width)
+int32_t align32(int32_t x) {
+    return (x + 31) & ~31;
+}
+
 int32_t align8(int32_t x) {
     return (x + 7) & ~7;
 }
+#include <stdio.h>
+#include <string.h>
 
 /**
- * \brief Prints performance statistics from DSP execution
+ * \brief Helper to format numbers with space separators (e.g. 1000000 -> "1 000 000")
+ */
+void format_cycles(uint64_t num, char* out_buf) {
+    char temp[32];
+    sprintf(temp, "%llu", (unsigned long long)num); // %llu for 64-bit safety
+    int len = strlen(temp);
+    int i, j = 0;
+
+    for (i = 0; i < len; i++) {
+        out_buf[j++] = temp[i];
+        // Add space if remaining digits are divisible by 3, but not at the end
+        if ((len - 1 - i) > 0 && (len - 1 - i) % 3 == 0) {
+            out_buf[j++] = ' ';
+        }
+    }
+    out_buf[j] = '\0';
+}
+
+/**
+ * \brief Prints performance statistics (CYCLES ONLY)
  */
 void print_profiling_stats(JPEG_COMPRESSION_DTO *dto) 
 {
-    double freq_mhz = 1000.0; 
+    char buf[32]; // Buffer for formatted numbers
 
-    appLogPrintf("==========================================\n");
-    appLogPrintf("   DSP C7x PROFILING REPORT \n");
-    appLogPrintf("==========================================\n");
-    appLogPrintf("Image Resolution : %dx%d\n", dto->width, dto->height);
-    appLogPrintf("------------------------------------------\n");
-    appLogPrintf("Step               Time (us)      Cycles  \n");
-    appLogPrintf("------------------------------------------\n");
+    printf("==========================================\n");
+    printf("   DSP C7x PROFILING REPORT (Cycles)      \n");
+    printf("==========================================\n");
+    printf("Image Resolution : %dx%d\n", dto->width, dto->height);
+    printf("------------------------------------------\n");
+    printf("Step               Cycles                 \n");
+    printf("------------------------------------------\n");
     
-    appLogPrintf("Color Conversion : %8.2f   %10lu\n", 
-           (double)dto->cycles_color_conversion / freq_mhz, dto->cycles_color_conversion);
+    format_cycles(dto->cycles_color_conversion, buf);
+    printf("Color Conversion : %15s\n", buf);
            
-    appLogPrintf("DCT              : %8.2f   %10lu\n", 
-           (double)dto->cycles_dct / freq_mhz, dto->cycles_dct);
+    format_cycles(dto->cycles_dct, buf);
+    printf("DCT              : %15s\n", buf);
            
-    appLogPrintf("Quantization     : %8.2f   %10lu\n", 
-           (double)dto->cycles_quantization / freq_mhz, dto->cycles_quantization);
+    format_cycles(dto->cycles_quantization, buf);
+    printf("Quantization     : %15s\n", buf);
            
-    appLogPrintf("ZigZag           : %8.2f   %10lu\n", 
-           (double)dto->cycles_zigzag / freq_mhz, dto->cycles_zigzag);
+    format_cycles(dto->cycles_zigzag, buf);
+    printf("ZigZag           : %15s\n", buf);
            
-    appLogPrintf("RLE              : %8.2f   %10lu\n", 
-           (double)dto->cycles_rle / freq_mhz, dto->cycles_rle);
+    format_cycles(dto->cycles_rle, buf);
+    printf("RLE              : %15s\n", buf);
            
-    appLogPrintf("Huffman          : %8.2f   %10lu\n", 
-           (double)dto->cycles_huffman / freq_mhz, dto->cycles_huffman);
+    format_cycles(dto->cycles_huffman, buf);
+    printf("Huffman          : %15s\n", buf);
            
-    appLogPrintf("------------------------------------------\n");
-    appLogPrintf("TOTAL DSP TIME   : %8.2f ms (%lu cyc)\n", 
-           (double)dto->cycles_total / freq_mhz / 1000.0, dto->cycles_total);
-    appLogPrintf("==========================================\n\n");
+    printf("------------------------------------------\n");
+    
+    format_cycles(dto->cycles_total, buf);
+    printf("TOTAL CYCLES     : %15s\n", buf);
+    printf("==========================================\n\n");
+}
+
+// Helper to print 8x8 block
+void print_debug_block(const char* name, void* data, int type) {
+    printf("\n--- DEBUG BLOCK: %s ---\n", name);
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            int idx = i * 8 + j;
+            if (type == 0) { // uint8 (Y)
+                printf("%3d ", ((uint8_t*)data)[idx]);
+            } else if (type == 1) { // float (DCT)
+                printf("%6.1f ", ((float*)data)[idx]);
+            } else if (type == 2) { // int16 (Quant/ZigZag)
+                printf("%4d ", ((int16_t*)data)[idx]);
+            }
+        }
+        printf("\n");
+    }
+    printf("--------------------------\n");
 }
 
 int main(int argc, char* argv[])
@@ -135,8 +180,8 @@ int main(int argc, char* argv[])
     // 1. CALCULATE ALIGNED DIMENSIONS
     int32_t orig_w = img->width;
     int32_t orig_h = img->height;
-    int32_t aligned_w = align8(orig_w);
-    int32_t aligned_h = align8(orig_h);
+    int32_t aligned_w = align32(orig_w); // Bilo je align8
+    int32_t aligned_h = align8(orig_h);  // Visina moze ostati na 8
     uint32_t aligned_pixel_count = aligned_w * aligned_h;
     
     appLogPrintf("JPEG: Loaded %dx%d -> Padded to %dx%d\n", orig_w, orig_h, aligned_w, aligned_h);
@@ -231,18 +276,29 @@ int main(int argc, char* argv[])
     else 
     {
         // ----------------------------------------------------
-        // SUCCESS: PRINT PROFILING STATS
+        // SUCCESS: PRINT PROFILING STATS AND DEBUG INFO OF FIRST BLOCK
         // ----------------------------------------------------
-        print_profiling_stats(&dto);
 
         // Invalidate caches to see results
-        appMemCacheInv(huff_output_virt, huff_capacity_bytes); 
+        appMemCacheInv(y_output_virt, 64);
+        appMemCacheInv(dct_output_virt, 64 * sizeof(float));
+        appMemCacheInv(quant_output_virt, 64 * sizeof(int16_t));
+        appMemCacheInv(zigzag_output_virt, 64 * sizeof(int16_t));
+
+        appLogPrintf("\n=== DEBUGGING FIRST BLOCK (0,0) ===\n");
+        
+        // Type 0=uint8, 1=float, 2=int16
+        print_debug_block("Y Input (shifted back +128)", y_output_virt, 0);
+        print_debug_block("DCT Coefficients", dct_output_virt, 1);
+        print_debug_block("Quantized", quant_output_virt, 2);
+        print_debug_block("ZigZag Ordered", zigzag_output_virt, 2);
+        print_profiling_stats(&dto);
 
         // Verify & Save
         appLogPrintf("JPEG: Compressed Size: %d bytes\n", dto.huff_size);
         
         if(dto.huff_size > 0) {
-            bool saved = saveJPEG(outputPath, orig_w, orig_h, huff_output_virt, dto.huff_size);
+            bool saved = saveJPEG(outputPath, aligned_w, orig_h, huff_output_virt, dto.huff_size);
             if (saved) {
                 appLogPrintf("SUCCESS: Saved to %s\n", outputPath);
             } else {
@@ -252,6 +308,8 @@ int main(int argc, char* argv[])
             appLogPrintf("ERROR: DSP returned 0 bytes!\n");
         }
     }
+
+    
 
     // Cleanup
     appLogPrintf("JPEG: Cleaning up...\n");

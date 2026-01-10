@@ -38,7 +38,7 @@ void extractYComponentBlock32x8(BMPImage *img, int32_t startX, int32_t startY, i
 
     /* 2. LOOP over 8 rows */
     /* We process 32 pixels width at once per iteration */
-    #pragma MUST_ITERATE(8, 8, 8)
+    //#pragma MUST_ITERATE(8, 8, 8)
     for (i = 0; i < 8; i++)
     {
         /* * LOAD (Vector Load) 
