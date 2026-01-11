@@ -37,7 +37,6 @@ __attribute__((aligned(64))) static const float DCT_T_TRANSPOSED[64] = {
     for ( i = 0; i < 8; i++) 
     {
         #pragma MUST_ITERATE(8, 8, 8)
-        #pragma UNROLL(8)
         for ( j = 0; j < 8; j++) 
         {
             float sum = 0.0f; /* FIX: Deklaracija varijable PRIJE pragme za inner loop */
