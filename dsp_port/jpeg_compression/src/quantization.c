@@ -1,51 +1,49 @@
 #ifdef __C7000__
 #include "jpeg_compression.h"
-#include <math.h>
 #include <c7x.h>
 
-/* -------------------------------------------------------------------------------------
- * QUANTIZATION CONSTANTS
- * -------------------------------------------------------------------------------------
- */
-
-/* Reciprocal Luminance Quantization Table (Linear 64 elements) */
-static const float RECIP_LUMINANCE_QUANT_TBL[64] = {
-    0.062500f, 0.090909f, 0.100000f, 0.062500f, 0.041667f, 0.025000f, 0.019608f, 0.016393f,
-    0.083333f, 0.083333f, 0.071429f, 0.052632f, 0.038462f, 0.017241f, 0.016667f, 0.018182f,
-    0.071429f, 0.076923f, 0.062500f, 0.041667f, 0.025000f, 0.017544f, 0.014493f, 0.017857f,
-    0.071429f, 0.058824f, 0.045455f, 0.034483f, 0.019608f, 0.011494f, 0.012500f, 0.016129f,
-    0.055556f, 0.045455f, 0.027027f, 0.017857f, 0.014706f, 0.009174f, 0.009709f, 0.012987f,
-    0.041667f, 0.028571f, 0.018182f, 0.015625f, 0.012346f, 0.009615f, 0.008850f, 0.010870f,
-    0.020408f, 0.015625f, 0.012821f, 0.011494f, 0.009709f, 0.008264f, 0.008333f, 0.009901f,
-    0.013889f, 0.010870f, 0.010526f, 0.010204f, 0.008929f, 0.010000f, 0.009709f, 0.010101f
+#pragma DATA_ALIGN(RECIP_LUMINANCE_QUANT_TBL, 64)
+static const int16_t RECIP_LUMINANCE_QUANT_TBL[64] = {
+    2048, 2978, 3276, 2048, 1365, 819, 642, 537,
+    2730, 2730, 2340, 1724, 1260, 564, 546, 595,
+    2340, 2520, 2048, 1365, 819, 574, 474, 585,
+    2340, 1927, 1489, 1129, 642, 376, 409, 528,
+    1820, 1489, 885, 585, 481, 300, 318, 425,
+    1365, 936, 595, 512, 404, 315, 289, 356,
+    668, 512, 420, 376, 318, 270, 273, 324,
+    455, 356, 344, 334, 292, 327, 318, 330
 };
 
-/**
- * \brief Quantizes a single 8x8 DCT block.
- * * Takes a linear array of 64 floats (from DCT), multiplies by the reciprocal
- * quantization table, and rounds to int16.
- *
- * \param dct_block    Input: Linear array of 64 floats (L1 memory)
- * \param quant_block  Output: Linear array of 64 int16_t (L1 memory)
- */
 void quantizeBlock(float *dct_block, int16_t *quant_block)
-{   
+{
+    float16 *v_dct_in = (float16 *)dct_block;
+    short16 *v_quant_tbl = (short16 *)RECIP_LUMINANCE_QUANT_TBL;
+    short16 *v_out = (short16 *)quant_block;
+
+    // Koristimo shift koji odgovara Q15 formatu
+    int16 v_shift = (int16)15;
     int i;
-    // C7x Optimization Hint:
-    // Inform compiler that we are processing exactly 64 elements.
-    // This allows it to generate optimal SIMD instructions without loop overhead code.
-    //#pragma MUST_ITERATE(64, 64, 64)
-    for ( i = 0; i < 64; i++) 
+    #pragma MUST_ITERATE(4, 4, 4)
+    #pragma UNROLL(4)
+    for ( i = 0; i < 4; i++) 
     {
-        float dctVal = dct_block[i];
-        float recipQ = RECIP_LUMINANCE_QUANT_TBL[i];
+        float16 val_f = v_dct_in[i];
         
-        // Math: val * (1/Q)
-        float scaled = dctVal * recipQ;
+        // 1. Float -> Int32
+        int16 val_i = __convert_int16(val_f); 
         
-        // Rounding
-        // roundf maps to efficient hardware instructions.
-        quant_block[i] = (int16_t)roundf(scaled);
+        // 2. Load Table
+        int16 q_i = __convert_int16(v_quant_tbl[i]);
+
+        // 3. Množenje
+        int16 product = val_i * q_i;
+
+        // 4. Shift BEZ sabiranja (Truncation)
+        // Ovo spaja Mult i Shift bliže u pipeline-u jer nema VADDW između
+        int16 res_32 = product >> v_shift;
+
+        // 5. Pack
+        v_out[i] = __convert_short16(res_32);
     }
 }
 #endif
