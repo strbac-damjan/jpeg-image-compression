@@ -16,7 +16,7 @@ static const float RECIP_LUMINANCE_QUANT_TBL[64] = {
     0.013889f, 0.010870f, 0.010526f, 0.010204f, 0.008929f, 0.010000f, 0.009709f, 0.010101f
 };
 
-void quantizeBlock(float *dct_block, int16_t *quant_block)
+void quantizeBlock(float * __restrict dct_block, int16_t * __restrict quant_block)
 {
     int i;
     // 1. Kastovanje pointera u vektorske pointere
