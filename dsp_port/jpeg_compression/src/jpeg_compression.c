@@ -42,7 +42,8 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
 
     /* Local L1 Buffers */
     __attribute__((aligned(64))) int8_t macro_y_buffer[MACRO_BLOCK_WIDTH * BLOCK_SIZE]; 
-    __attribute__((aligned(64))) float   dct_block[64];    
+    //__attribute__((aligned(64))) float   dct_block[64];    
+    __attribute__((aligned(64))) float macro_dct_buffer[MACRO_BLOCK_WIDTH * BLOCK_SIZE]; 
     __attribute__((aligned(64))) int16_t quant_block[64];
     __attribute__((aligned(64))) int16_t zigzag_block[64];
 
@@ -53,7 +54,8 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     /* Loop vars */
     int y, x, k, i, row;
     int32_t syms;
-    int8_t *block_ptr;
+    //int8_t *block_ptr;
+    float *current_dct_ptr;
 
     /* ---------------------------------------------------------------------
      * 2. INITIALIZATION
@@ -94,19 +96,19 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
             extractYComponentBlock4x8x8(&inputImg, x, y, macro_y_buffer);
             sum_color += (__TSC - t_step);
 
+            t_step = __TSC;
+            computeDCTBlock4x8x8(macro_y_buffer, macro_dct_buffer, MACRO_BLOCK_WIDTH);
+            sum_dct += (__TSC - t_step);
+
             /* B. Process 4 blocks */
             for (k = 0; k < 4; k++) 
             {
-                block_ptr = macro_y_buffer + (k * 8);
+                current_dct_ptr = macro_dct_buffer + (k * 64);
 
-                /* --- DCT --- */
-                t_step = __TSC;
-                computeDCTBlock(block_ptr, dct_block, MACRO_BLOCK_WIDTH); 
-                sum_dct += (__TSC - t_step);
 
                 /* --- Quantization --- */
                 t_step = __TSC;
-                quantizeBlock(dct_block, quant_block);
+                quantizeBlock(current_dct_ptr, quant_block);
                 sum_quant += (__TSC - t_step);
 
                 /* --- ZigZag --- */
@@ -123,11 +125,11 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
                     for(row=0; row<8; row++) {
                         for(i=0; i<8; i++) {
                             /* Pretvaramo int8 (-128..127) nazad u uint8 (0..255) za pregled */
-                            debug_y_ptr[row*8 + i] = (uint8_t)(block_ptr[row*32 + i] + 128);
+                            debug_y_ptr[row*8 + i] = (uint8_t)(macro_y_buffer[row*32 + i] + 128);
                         }
                     }
                     /* Save DCT (Linear copy) */
-                    for(i=0; i<64; i++) debug_dct_ptr[i] = dct_block[i];
+                    for(i=0; i<64; i++) debug_dct_ptr[i] = current_dct_ptr[i];
                     
                     /* Save Quant (Linear copy) */
                     for(i=0; i<64; i++) debug_quant_ptr[i] = quant_block[i];

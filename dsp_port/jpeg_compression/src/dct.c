@@ -54,51 +54,82 @@ __attribute__((aligned(64))) static const float DCT_T_TRANSPOSED[64] = {
 }
 
 /**
- * \brief Computes DCT for a single 8x8 block.
+ * \brief Computes DCT for a single 8x8 block (Float Input).
+ * \param src_block Pointer to 8x8 float block (linear, 64 elements).
+ * \param dct_out   Pointer to output float buffer (linear, 64 elements).
  */
-void computeDCTBlock(int8_t * __restrict src_data, float * __restrict dct_out, int32_t stride)
+static void computeDCTBlock(const float * __restrict src_block, float * __restrict dct_out)
 {
-    /* OPTIMIZACIJA: Koristimo linearne nizove od 64 elementa umjesto 2D [8][8].
-     * Poravnanje na 64 bajta je kljucno za VLD/VST instrukcije.
-     */
-    __attribute__((aligned(64))) float block[64];
+    /* Aligned buffers for intermediate results */
     __attribute__((aligned(64))) float temp[64];
     __attribute__((aligned(64))) float result[64];
     
-    int i, j;
+    int i;
 
-    /* 1. Load Data & Convert */
-    #pragma MUST_ITERATE(8, 8, 8)
-    for( i = 0; i < 8; i++)
-    {
-        /* Pokazivač na početak reda u ulaznom bufferu */
-        int8_t *row_ptr = src_data + (i * stride);
-
-        #pragma MUST_ITERATE(8, 8, 8)
-        #pragma UNROLL(8)
-        for( j = 0; j < 8; j++)
-        {
-            /* Linearni upis u block buffer */
-            block[i*8 + j] = (float)row_ptr[j];
-        }
-    }
-
-    /* * DCT Calculation: Result = T * Block * T' */
+    /* * VIŠE NEMA KONVERZIJE OVDJE. 
+     * Pretpostavljamo da je 'src_block' već float i linearan (0..63).
+     */
 
     /* Step A: Temp = Block * T' */
-    matrixMul8x8(block, DCT_T_TRANSPOSED, temp);
+    /* src_block je A, DCT_T_TRANSPOSED je B */
+    matrixMul8x8(src_block, DCT_T_TRANSPOSED, temp);
 
     /* Step B: Result = T * Temp */
+    /* DCT_T je A, temp je B */
     matrixMul8x8(DCT_T, temp, result);
 
-    /* 2. Store Result (Linear Store) */
-    /* Sada su oba pointera (result i dct_out) linearni nizovi float-ova.
-     * Nema vise type mismatch greske.
-     */
+    /* Store Result */
     #pragma MUST_ITERATE(64, 64, 64)
     for( i = 0; i < 64; i++)
     {
         dct_out[i] = result[i];
+    }
+}
+/**
+ * \brief Computes DCT for a 32x8 Macro Block.
+ * Handles int8 -> float conversion here.
+ */
+void computeDCTBlock4x8x8(const int8_t * __restrict src_data, float * __restrict dct_out, int32_t stride) 
+{
+    /* * Buffer za jedan 8x8 blok u float formatu.
+     * Alociramo ga na stacku s poravnanjem za vektorske instrukcije.
+     */
+    __attribute__((aligned(64))) float work_block[64];
+    
+    int k, r, c;
+
+    /* Procesiramo 4 bloka horizontalno (0, 1, 2, 3) */
+    #pragma MUST_ITERATE(4, 4, 4)
+    #pragma UNROLL(4) // Pokušaj unrollati vanjsku petlju ako compiler dozvoli
+    for (k = 0; k < 4; k++)
+    {
+        /* * 1. LOAD & CONVERT
+         * Izvlačimo 8x8 blok iz 32x8 int8 buffera i prebacujemo u float buffer.
+         */
+        
+        // Pointer na početak trenutnog 8x8 bloka u int8 bufferu
+        const int8_t *block_src_start = src_data + (k * 8); 
+
+        #pragma MUST_ITERATE(8, 8, 8)
+        #pragma UNROLL(8)
+        for(r = 0; r < 8; r++)
+        {
+            // Pointer na trenutni red unutar bloka
+            const int8_t *row_ptr = block_src_start + (r * stride);
+            
+            #pragma MUST_ITERATE(8, 8, 8)
+            for(c = 0; c < 8; c++)
+            {
+                // Linearni index za work_block (0..63)
+                work_block[r*8 + c] = (float)row_ptr[c];
+            }
+        }
+
+        /* * 2. COMPUTE DCT
+         * Pozivamo ažuriranu funkciju koja prima float.
+         * Output ide direktno u završni buffer.
+         */
+        computeDCTBlock(work_block, dct_out + (k * 64));
     }
 }
 #endif
