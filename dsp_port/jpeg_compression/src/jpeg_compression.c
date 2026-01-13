@@ -50,7 +50,7 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     __attribute__((aligned(64))) int16_t macro_quant_buffer[MACRO_BLOCK_WIDTH * BLOCK_SIZE];
 
     /* ZigZag Output: 1 block * 64 shorts (ZigZag se i dalje radi sekvencijalno) */
-    __attribute__((aligned(64))) int16_t zigzag_block[64];
+    __attribute__((aligned(64))) int16_t macro_zigzag_buffer[MACRO_BLOCK_WIDTH * BLOCK_SIZE];
 
     /* Profiling vars */
     uint64_t sum_color = 0, sum_dct = 0, sum_quant = 0, sum_zigzag = 0, sum_rle = 0;
@@ -61,6 +61,7 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     int32_t syms;
     float *current_dct_ptr;
     int16_t *current_quant_ptr;
+    int16_t *current_zigzag_ptr;
 
     /* ---------------------------------------------------------------------
      * 2. INITIALIZATION
@@ -113,6 +114,10 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
             quantizeBlock4x8x8(macro_dct_buffer, macro_quant_buffer);
             sum_quant += (__TSC - t_step);
 
+            t_step = __TSC;
+            performZigZagBlock4x8x8(macro_quant_buffer, macro_zigzag_buffer);
+            sum_zigzag += (__TSC - t_step);
+
             /* --- D. Process individual blocks (ZigZag & RLE) --- */
             /* Ovi koraci su teži za vektorizaciju zbog prirode RLE-a (promjenjiva dužina) 
              * i ZigZag-a (scattered reads), pa ih radimo u petlji.
@@ -122,12 +127,7 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
                 /* Postavljamo pointere na trenutni blok unutar macro buffera (offset za 64 elementa) */
                 current_dct_ptr   = macro_dct_buffer + (k * 64);
                 current_quant_ptr = macro_quant_buffer + (k * 64);
-
-                /* --- ZigZag --- */
-                t_step = __TSC;
-                /* Uzimamo podatke iz macro_quant_buffer i pišemo u zigzag_block */
-                performZigZagBlock(current_quant_ptr, zigzag_block);
-                sum_zigzag += (__TSC - t_step);
+                current_zigzag_ptr = macro_zigzag_buffer + (k * 64);
 
                 /* * DEBUG: SAVE ONLY THE FIRST BLOCK (0,0) TO DDR */
                 if (y == 0 && x == 0 && k == 0)
@@ -145,12 +145,12 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
                     for(i=0; i<64; i++) debug_quant_ptr[i] = current_quant_ptr[i];
 
                     /* Save ZigZag */
-                    for(i=0; i<64; i++) debug_zigzag_ptr[i] = zigzag_block[i];
+                    for(i=0; i<64; i++) debug_zigzag_ptr[i] = current_zigzag_ptr[i];
                 }
 
                 /* --- RLE --- */
                 t_step = __TSC;
-                syms = performRLEBlock(zigzag_block, rleCurrent, 
+                syms = performRLEBlock(current_zigzag_ptr, rleCurrent, 
                                    max_rle_capacity - total_rle_symbols, 
                                    &global_last_dc);
                 sum_rle += (__TSC - t_step);
