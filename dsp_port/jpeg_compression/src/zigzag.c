@@ -9,6 +9,7 @@
  * e.g. ZIGZAG_ORDER[1] = 1 (horizontal neighbor)
  * ZIGZAG_ORDER[2] = 8 (vertical neighbor)
  */
+// #pragma DATA_ALIGN(ZIGZAG_ORDER, 64)
 static const uint8_t ZIGZAG_ORDER[64] = {
     0, 1, 8, 16, 9, 2, 3, 10,
     17, 24, 32, 25, 18, 11, 4, 5,
@@ -28,7 +29,7 @@ static const uint8_t ZIGZAG_ORDER[64] = {
  * \param quant_block   Input: Linear array of 64 int16_t (Raster Order)
  * \param zigzag_block  Output: Linear array of 64 int16_t (ZigZag Order)
  */
-void performZigZagBlock(int16_t *quant_block, int16_t *zigzag_block)
+void performZigZagBlock(const int16_t * __restrict quant_block, int16_t * __restrict zigzag_block)
 {
     int i;
     // Inform the compiler about the loop structure

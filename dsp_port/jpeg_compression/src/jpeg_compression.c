@@ -87,7 +87,7 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     debug_dct_ptr    = (float   *)(uintptr_t)appMemShared2TargetPtr(dto->dct_phy_ptr);
     debug_quant_ptr  = (int16_t *)(uintptr_t)appMemShared2TargetPtr(dto->quant_phy_ptr);
     debug_zigzag_ptr = (int16_t *)(uintptr_t)appMemShared2TargetPtr(dto->zigzag_phy_ptr);
-
+    
     /* ---------------------------------------------------------------------
      * 3. PIPELINE LOOP
      * ---------------------------------------------------------------------
