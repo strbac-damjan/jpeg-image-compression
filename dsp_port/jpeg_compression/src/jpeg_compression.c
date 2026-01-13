@@ -92,6 +92,7 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
      * 3. PIPELINE LOOP
      * ---------------------------------------------------------------------
      */
+    init_ZigZag_Masks();
     for (y = 0; y < dto->height; y += BLOCK_SIZE) 
     {
         for (x = 0; x < dto->width; x += MACRO_BLOCK_WIDTH) 

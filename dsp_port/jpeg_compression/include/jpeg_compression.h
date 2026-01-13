@@ -146,6 +146,7 @@ void extractYComponentBlock4x8x8(const BMPImage * __restrict img, int32_t startX
 
 // void quantizeBlock(float * __restrict dct_block, int16_t * __restrict quant_block);
 
+void init_ZigZag_Masks(void);
 void performZigZagBlock(const int16_t * __restrict quant_block, int16_t * __restrict zigzag_block);
 
 int32_t performRLEBlock(int16_t *block, RLESymbol *rle_out, int32_t max_capacity, int16_t *last_dc_ptr);
