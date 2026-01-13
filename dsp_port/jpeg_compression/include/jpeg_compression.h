@@ -140,11 +140,11 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto);
 
 
 
-void extractYComponentBlock32x8(BMPImage *img, int32_t start_x, int32_t start_y, int8_t *macro_buffer);
+void extractYComponentBlock4x8x8(const BMPImage * __restrict img, int32_t startX, int32_t startY, int8_t * __restrict outputBuffer);
 
-void computeDCTBlock(int8_t *src_data, float *dct_out, int32_t stride);
+void computeDCTBlock(int8_t * __restrict src_data, float * __restrict dct_out, int32_t stride);
 
-void quantizeBlock(float *dct_block, int16_t *quant_block);
+void quantizeBlock(float * __restrict dct_block, int16_t * __restrict quant_block);
 
 void performZigZagBlock(int16_t *quant_block, int16_t *zigzag_block);
 

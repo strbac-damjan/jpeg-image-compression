@@ -91,7 +91,7 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
         {
             /* A. Color Space Extraction */
             t_step = __TSC;
-            extractYComponentBlock32x8(&inputImg, x, y, macro_y_buffer);
+            extractYComponentBlock4x8x8(&inputImg, x, y, macro_y_buffer);
             sum_color += (__TSC - t_step);
 
             /* B. Process 4 blocks */

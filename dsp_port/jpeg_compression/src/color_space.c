@@ -10,7 +10,7 @@
 #define COEFF_G 150
 #define COEFF_B 29
 
-void extractYComponentBlock32x8(BMPImage *img, int32_t startX, int32_t startY, int8_t * __restrict outputBuffer)
+void extractYComponentBlock4x8x8(const BMPImage * __restrict img, int32_t startX, int32_t startY, int8_t * __restrict outputBuffer)
 {
     int i;
     int32_t width = img->width;
