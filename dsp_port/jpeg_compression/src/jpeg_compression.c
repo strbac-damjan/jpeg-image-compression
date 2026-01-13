@@ -20,7 +20,6 @@ int32_t JpegCompression_Init()
     appLogPrintf("JPEG Compression: Init ... DONE!!!\n");
     return status;
 }
-
 int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto) 
 {
     /* ---------------------------------------------------------------------
@@ -34,17 +33,23 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     uint8_t *huffData;
     int32_t huff_capacity, bytesWritten;
 
-    /* Debug pointers (mapped only if needed) */
+    /* Debug pointers */
     uint8_t *debug_y_ptr;
     float   *debug_dct_ptr;
     int16_t *debug_quant_ptr;
     int16_t *debug_zigzag_ptr;
 
     /* Local L1 Buffers */
+    /* Input: 32x8 int8 pixels */
     __attribute__((aligned(64))) int8_t macro_y_buffer[MACRO_BLOCK_WIDTH * BLOCK_SIZE]; 
-    //__attribute__((aligned(64))) float   dct_block[64];    
+    
+    /* DCT Output / Quant Input: 4 blocks * 64 floats = 256 floats */
     __attribute__((aligned(64))) float macro_dct_buffer[MACRO_BLOCK_WIDTH * BLOCK_SIZE]; 
-    __attribute__((aligned(64))) int16_t quant_block[64];
+    
+    /* Quant Output / ZigZag Input: 4 blocks * 64 shorts = 256 shorts (NOVO) */
+    __attribute__((aligned(64))) int16_t macro_quant_buffer[MACRO_BLOCK_WIDTH * BLOCK_SIZE];
+
+    /* ZigZag Output: 1 block * 64 shorts (ZigZag se i dalje radi sekvencijalno) */
     __attribute__((aligned(64))) int16_t zigzag_block[64];
 
     /* Profiling vars */
@@ -54,8 +59,8 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     /* Loop vars */
     int y, x, k, i, row;
     int32_t syms;
-    //int8_t *block_ptr;
     float *current_dct_ptr;
+    int16_t *current_quant_ptr;
 
     /* ---------------------------------------------------------------------
      * 2. INITIALIZATION
@@ -77,7 +82,7 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     huffData = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->huff_phy_ptr);
     huff_capacity = dto->width * dto->height;
 
-    /* Mapiranje debug pointera (da mozemo pisati u njih za prvi blok) */
+    /* Mapiranje debug pointera */
     debug_y_ptr      = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->y_phy_ptr);
     debug_dct_ptr    = (float   *)(uintptr_t)appMemShared2TargetPtr(dto->dct_phy_ptr);
     debug_quant_ptr  = (int16_t *)(uintptr_t)appMemShared2TargetPtr(dto->quant_phy_ptr);
@@ -91,50 +96,54 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto)
     {
         for (x = 0; x < dto->width; x += MACRO_BLOCK_WIDTH) 
         {
-            /* A. Color Space Extraction */
+            /* --- A. Color Space Extraction (Macro Block) --- */
             t_step = __TSC;
             extractYComponentBlock4x8x8(&inputImg, x, y, macro_y_buffer);
             sum_color += (__TSC - t_step);
 
+            /* --- B. DCT (Macro Block) --- */
             t_step = __TSC;
             computeDCTBlock4x8x8(macro_y_buffer, macro_dct_buffer, MACRO_BLOCK_WIDTH);
             sum_dct += (__TSC - t_step);
 
-            /* B. Process 4 blocks */
+            /* --- C. Quantization (Macro Block - NOVO) --- */
+            /* Sada se kvantizacija radi za sva 4 bloka odjednom prije ulaska u petlju */
+            t_step = __TSC;
+            quantizeBlock4x8x8(macro_dct_buffer, macro_quant_buffer);
+            sum_quant += (__TSC - t_step);
+
+            /* --- D. Process individual blocks (ZigZag & RLE) --- */
+            /* Ovi koraci su teži za vektorizaciju zbog prirode RLE-a (promjenjiva dužina) 
+             * i ZigZag-a (scattered reads), pa ih radimo u petlji.
+             */
             for (k = 0; k < 4; k++) 
             {
-                current_dct_ptr = macro_dct_buffer + (k * 64);
-
-
-                /* --- Quantization --- */
-                t_step = __TSC;
-                quantizeBlock(current_dct_ptr, quant_block);
-                sum_quant += (__TSC - t_step);
+                /* Postavljamo pointere na trenutni blok unutar macro buffera (offset za 64 elementa) */
+                current_dct_ptr   = macro_dct_buffer + (k * 64);
+                current_quant_ptr = macro_quant_buffer + (k * 64);
 
                 /* --- ZigZag --- */
                 t_step = __TSC;
-                performZigZagBlock(quant_block, zigzag_block);
+                /* Uzimamo podatke iz macro_quant_buffer i pišemo u zigzag_block */
+                performZigZagBlock(current_quant_ptr, zigzag_block);
                 sum_zigzag += (__TSC - t_step);
 
-                /* * DEBUG: SAVE ONLY THE FIRST BLOCK (0,0) TO DDR 
-                 * Ovo omogucava Main funkciji da ispise sta se desava.
-                 */
+                /* * DEBUG: SAVE ONLY THE FIRST BLOCK (0,0) TO DDR */
                 if (y == 0 && x == 0 && k == 0)
                 {
-                    /* Save Y (Input to DCT). Note: macro buffer is strided 32! */
+                    /* Save Y */
                     for(row=0; row<8; row++) {
                         for(i=0; i<8; i++) {
-                            /* Pretvaramo int8 (-128..127) nazad u uint8 (0..255) za pregled */
                             debug_y_ptr[row*8 + i] = (uint8_t)(macro_y_buffer[row*32 + i] + 128);
                         }
                     }
-                    /* Save DCT (Linear copy) */
+                    /* Save DCT */
                     for(i=0; i<64; i++) debug_dct_ptr[i] = current_dct_ptr[i];
                     
-                    /* Save Quant (Linear copy) */
-                    for(i=0; i<64; i++) debug_quant_ptr[i] = quant_block[i];
+                    /* Save Quant */
+                    for(i=0; i<64; i++) debug_quant_ptr[i] = current_quant_ptr[i];
 
-                    /* Save ZigZag (Linear copy) */
+                    /* Save ZigZag */
                     for(i=0; i<64; i++) debug_zigzag_ptr[i] = zigzag_block[i];
                 }
 
