@@ -163,19 +163,57 @@ void print_debug_block(const char* name, void* data, int type)
     printf("--------------------------\n");
 }
 
+// Helper function to print usage instructions
+void print_usage(const char* prog_name) {
+    appLogPrintf("Usage: %s --input_path <path_to_bmp> --output_path <path_to_jpg>\n", prog_name);
+}
+
+
+
 int main(int argc, char* argv[])
 {
     int32_t status;
+    const char* inputPath = NULL;
+    const char* outputPath = NULL;
 
-    // Expect input BMP path and output JPEG path
-    if (argc < 3)
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++)
     {
-        appLogPrintf("Usage: %s <input_bmp_path> <output_jpeg_path>\n", argv[0]);
-        return -1;
+        if (strcmp(argv[i], "--input_path") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                inputPath = argv[++i]; // Increment i to skip the value next iteration
+            }
+            else
+            {
+                appLogPrintf("Error: --input_path requires a value.\n");
+                print_usage(argv[0]);
+                return -1;
+            }
+        }
+        else if (strcmp(argv[i], "--output_path") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                outputPath = argv[++i]; // Increment i to skip the value next iteration
+            }
+            else
+            {
+                appLogPrintf("Error: --output_path requires a value.\n");
+                print_usage(argv[0]);
+                return -1;
+            }
+        }
     }
 
-    const char* inputPath = argv[1];
-    const char* outputPath = argv[2];
+    // Validate that both arguments were provided
+    if (inputPath == NULL || outputPath == NULL)
+    {
+        appLogPrintf("Error: Missing required arguments.\n");
+        print_usage(argv[0]);
+        return -1;
+    }
 
     // Initialize application and system services
     appLogPrintf("JPEG: Initializing App...\n");
