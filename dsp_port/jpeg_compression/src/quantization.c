@@ -2,7 +2,7 @@
 #include "jpeg_compression.h"
 #include <c7x.h>
 
-// Poravnanje je ključno za VLD (Vector Load) instrukcije
+// Alignment is critical for vector load instructions on C7000
 #pragma DATA_ALIGN(RECIP_LUMINANCE_QUANT_TBL, 64)
 static const float RECIP_LUMINANCE_QUANT_TBL[64] = {
     0.062500f, 0.090909f, 0.100000f, 0.062500f, 0.041667f, 0.025000f, 0.019608f, 0.016393f,
@@ -15,63 +15,59 @@ static const float RECIP_LUMINANCE_QUANT_TBL[64] = {
     0.013889f, 0.010870f, 0.010526f, 0.010204f, 0.008929f, 0.010000f, 0.009709f, 0.010101f
 };
 
-/**
- * \brief Kvantizacija za 4 bloka odjednom (4x8x8).
- * \param dct_macro_block Ulaz: 256 floata (4 bloka x 64 koeficijenta), linearno složeni.
- * \param quant_macro_block Izlaz: 256 shortova.
- */
-void quantizeBlock4x8x8(float * __restrict dct_macro_block, int16_t * __restrict quant_macro_block)
-{
-    /* * STRATEGIJA:
-     * Imamo 4 bloka (0,1,2,3). Svaki blok ima 64 elementa.
-     * Tabela kvantizacije ima 64 elementa.
-     * C7000 vektor je 16 floatova. Znači tabela stane u 4 vektora (4x16=64).
-     * * Optimizacija: Učitaćemo tabelu u registre JEDNOM (4 vektora) 
-     * i koristiti je ponovo za svaki od 4 bloka podataka.
-     */
 
+void quantizeBlock4x8x8(float * __restrict dct_macro_block,
+                        int16_t * __restrict quant_macro_block)
+{
+    // The macro block consists of four DCT blocks
+    // Each block has 64 coefficients
+    // The quantization table has 64 elements and fits into four float16 vectors
+    // The table is loaded once and reused for all four blocks to reduce memory traffic
+
+    // Vector pointer to the DCT coefficients
     float16 *v_dct_ptr   = (float16 *)dct_macro_block;
+
+    // Vector pointer to the quantized output
     short16 *v_quant_out = (short16 *)quant_macro_block;
-    
-    // Pomoćni pointer za učitavanje tabele
+
+    // Helper pointer for loading the quantization table as vectors
     float16 *v_tbl_ptr   = (float16 *)RECIP_LUMINANCE_QUANT_TBL;
 
-    // 1. Preload Quantization Table (4 vektora po 16 floatova)
-    // Ovo smanjuje pritisak na load unit jer se tabela ne učitava iz memorije 4 puta.
+    // Preload the quantization table into vector registers
+    // This avoids reloading the table from memory for each block
     float16 q_vec0 = v_tbl_ptr[0];
     float16 q_vec1 = v_tbl_ptr[1];
     float16 q_vec2 = v_tbl_ptr[2];
     float16 q_vec3 = v_tbl_ptr[3];
 
-    int k;
+    int k, offset;
 
-    // Procesiramo 4 bloka (Macro Block)
-    // #pragma UNROLL(4) ovdje govori kompajleru da kopira tijelo petlje 4 puta
-    // i zamijeni 'k' konstantama, što omogućava savršen pipelining.
+    // Process four 8x8 blocks in the macro block
+    // Loop unrolling allows the compiler to fully pipeline vector operations
     #pragma MUST_ITERATE(4, 4, 4)
     #pragma UNROLL(4)
-    for (k = 0; k < 4; k++) 
+    for (k = 0; k < 4; k++)
     {
-        // Računamo bazni offset za trenutni blok (u vektorima)
-        // Svaki blok ima 4 vektora (64 floata / 16 = 4)
-        int offset = k * 4;
+        // Compute the base offset for the current block in vector units
+        // Each block occupies four float16 vectors
+        offset = k * 4;
 
-        // Vektor 0 u bloku
+        // Process the first vector of the block
         float16 val0 = v_dct_ptr[offset + 0];
         float16 res0 = val0 * q_vec0;
-        v_quant_out[offset + 0] = __convert_short16(res0); // Koristi _rtn verziju ako je dostupna
+        v_quant_out[offset + 0] = __convert_short16(res0);
 
-        // Vektor 1 u bloku
+        // Process the second vector of the block
         float16 val1 = v_dct_ptr[offset + 1];
         float16 res1 = val1 * q_vec1;
         v_quant_out[offset + 1] = __convert_short16(res1);
 
-        // Vektor 2 u bloku
+        // Process the third vector of the block
         float16 val2 = v_dct_ptr[offset + 2];
         float16 res2 = val2 * q_vec2;
         v_quant_out[offset + 2] = __convert_short16(res2);
 
-        // Vektor 3 u bloku
+        // Process the fourth vector of the block
         float16 val3 = v_dct_ptr[offset + 3];
         float16 res3 = val3 * q_vec3;
         v_quant_out[offset + 3] = __convert_short16(res3);

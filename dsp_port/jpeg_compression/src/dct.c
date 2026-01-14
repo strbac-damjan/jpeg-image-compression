@@ -29,7 +29,8 @@ __attribute__((aligned(64))) static const float DCT_T_TRANSPOSED[64] = {
 
 /**
  * \brief Standard Matrix Multiplication 8x8 (C = A * B)
- */static inline void matrixMul8x8(const float * __restrict A, const float * __restrict B, float * __restrict C)
+ */
+static inline void matrixMul8x8(const float * __restrict A, const float * __restrict B, float * __restrict C)
 {
     int i, j, k;
     
@@ -85,10 +86,7 @@ static void computeDCTBlock(const float * __restrict src_block, float * __restri
         dct_out[i] = result[i];
     }
 }
-/**
- * \brief Computes DCT for a 32x8 Macro Block.
- * Handles int8 -> float conversion here.
- */
+
 void computeDCTBlock4x8x8(const int8_t * __restrict src_data, float * __restrict dct_out, int32_t stride) 
 {
     /* * Buffer za jedan 8x8 blok u float formatu.

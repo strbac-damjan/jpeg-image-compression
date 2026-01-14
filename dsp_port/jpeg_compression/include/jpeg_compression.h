@@ -21,32 +21,6 @@
 // -------------------------------------------------------------------------------------
 // ---------------------------STRUCTURE DEFINITIONS-------------------------------------
 // -------------------------------------------------------------------------------------
-typedef struct BMPImage {
-    int32_t width;
-    int32_t height;
-    uint8_t* r;  // Red channel
-    uint8_t* g;  // Green channel
-    uint8_t* b;  // Blue channel
-} BMPImage;
-
-typedef struct {
-    int width;           // Image width
-    int height;          // Image height
-    uint8_t *data;       // Pointer to the pixel array (length = width * height)
-                         // Values 0-255 (where 0=black, 255=white)
-} YImage;
-
-typedef struct {
-    int width;
-    int height;
-    float *coefficients; // Width * Height
-} DCTImage;
-
-typedef struct {
-    int32_t width;
-    int32_t height;
-    int16_t *data; // 16-bit signed integers for quantized values
-} QuantizedImage;
 
 typedef struct {
     uint8_t symbol;    // (Run << 4) | Size
@@ -92,11 +66,13 @@ typedef struct JPEG_COMPRESSION_DTO
 // --------------------------TI SERVICE FUNCTIONS---------------------------------------
 // -------------------------------------------------------------------------------------
 
-// Remote service handler
+// Remote service handler for JPEG compression
+// Casts input parameters to DTO and triggers JPEG conversion
 int32_t JpegCompression_RemoteServiceHandler(char *service_name, uint32_t cmd,
 void *prm, uint32_t prm_size, uint32_t flags);
 
-// Service initialization function
+// Initializes the JPEG compression remote service
+// Registers the service handler with the system
 int32_t JpegCompression_Init();
 
 
@@ -112,24 +88,52 @@ int32_t JpegCompression_Init();
 int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto);
 
 
-void extractYComponentBlock4x8x8(const uint8_t * __restrict rComponent, 
-                                 const uint8_t * __restrict gComponent, 
-                                 const uint8_t * __restrict bComponent, int32_t startX, int32_t startY, int width, int8_t * __restrict outputBuffer);
-
+/**
+ * \brief Extracts the Y (luminance) component from RGB input for a 4x8x8 block of pixels
+ */
+void extractYComponentBlock4x8x8(
+    uint8_t * __restrict rComponent,
+    uint8_t * __restrict gComponent,
+    uint8_t * __restrict bComponent,
+    int32_t startX,
+    int32_t startY,
+    int width,
+    int8_t * __restrict outputBuffer);
 
 void init_ZigZag_Masks(void);
 
+/**
+ * \brief Computes DCT for a 32x8 Macro Block.
+ * Handles int8 -> float conversion here.
+ */
 void computeDCTBlock4x8x8(const int8_t * __restrict src_data, float * __restrict dct_out, int32_t stride);
 
+
+/**
+ * \brief Performs quantization for four 8x8 blocks at once
+ * Input contains 256 floats representing four DCT blocks stored linearly
+ * Output contains 256 int16 values after quantization
+ */
 void quantizeBlock4x8x8(float * __restrict dct_macro_block, int16_t * __restrict quant_macro_block);
 
+/**
+ * \brief Performs ZigZag reordering on four 8x8 blocks using vector permute
+ * Input is in linear raster order and output is in ZigZag order
+ */
 void performZigZagBlock4x8x8(const int16_t * __restrict src_macro, int16_t * __restrict dst_macro);
 
+/**
+ * \brief Performs run-length encoding on four ZigZag-ordered 8x8 blocks
+ * Produces JPEG-compliant RLE symbols
+ */
 int32_t performRLEBlock4x8x8(const int16_t * __restrict macro_zigzag_buffer, 
                              RLESymbol * __restrict rle_out, 
                              int32_t max_capacity, 
                              int16_t *last_dc_ptr);
 
+/**
+ * \brief Performs Huffman encoding of RLE symbols into a byte stream
+ */
 int32_t performHuffman(RLESymbol * __restrict rleData, int32_t numSymbols, uint8_t * __restrict outBuffer, int32_t bufferCapacity);
 
 // -------------------------------------------------------------------------------------

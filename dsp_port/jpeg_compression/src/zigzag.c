@@ -3,15 +3,20 @@
 #include <c7x.h>
 #include "jpeg_compression.h"
 
-/* ========================================================================== */
-/* DEFINICIJA MASKI I TABELA                                                  */
-/* ========================================================================== */
+// ==========================================================================
+// MASK AND TABLE DEFINITIONS
+// ==========================================================================
+
+// Permutation mask for the lower half of the ZigZag output
 #pragma DATA_ALIGN(perm_mask_lo, 64)
 static uchar64 perm_mask_lo;
 
+// Permutation mask for the upper half of the ZigZag output
 #pragma DATA_ALIGN(perm_mask_hi, 64)
 static uchar64 perm_mask_hi;
 
+// Reference ZigZag order for an 8x8 block
+// Values represent indices in raster order
 static const uint8_t ZIGZAG_ORDER_REF[64] = {
     0, 1, 8, 16, 9, 2, 3, 10,
     17, 24, 32, 25, 18, 11, 4, 5,
@@ -23,42 +28,40 @@ static const uint8_t ZIGZAG_ORDER_REF[64] = {
     53, 60, 61, 54, 47, 55, 62, 63
 };
 
-/* ========================================================================== */
-/* HELPER FUNKCIJA (INLINE)                                                   */
-/* ========================================================================== */
-/* Simulira vperm sa 2 izvora. Selektuje bajtove iz src1 ili src2 zavisno od maske */
+// Wrapper that emulates a two-source vector permute operation
+// Bytes are selected from src1 or src2 depending on the mask value
 static inline uchar64 __vperm_wrapper(uchar64 mask, uchar64 src1, uchar64 src2)
 {
-    // C7x __vperm_vvv koristi samo donjih 6 bita indeksa (modulo 64)
+    // Perform permutation assuming src1 as the source
     uchar64 p1 = __vperm_vvv(mask, src1);
+
+    // Perform permutation assuming src2 as the source
     uchar64 p2 = __vperm_vvv(mask, src2);
 
-    // Kreiramo predikat: Ako je bajt u maski > 63 (bit 6 setovan), trebamo src2.
-    // Inace trebamo src1.
-    __vpred pred = __cmp_gt_pred(convert_char64(mask), (char64)63); 
+    // Create a predicate that selects src2 when mask value exceeds 63
+    __vpred pred = __cmp_gt_pred(convert_char64(mask), (char64)63);
 
-    // Selektujemo pravi rezultat
+    // Select between src1 and src2 permutation results
     return __select(pred, p2, p1);
 }
 
-/* ========================================================================== */
-/* INICIJALIZACIJA (POZVATI JEDNOM U MAIN-u)                                  */
-/* ========================================================================== */
+// Initializes permutation masks for ZigZag operation
+// This function should be called once during program initialization
 void init_ZigZag_Masks(void)
 {
     uint8_t temp_lo[64];
     uint8_t temp_hi[64];
     int i;
 
-    // Generisanje maske za donji deo (prva 32 shorta / 64 bajta izlaza)
+    // Generate mask for the lower half of the ZigZag output
+    // Each short consists of two bytes, so both bytes are mapped
     for (i = 0; i < 32; i++) {
         uint8_t src_idx = ZIGZAG_ORDER_REF[i];
-        // Short se sastoji od 2 bajta, pa moramo mapirati oba
-        temp_lo[2 * i]     = (uint8_t)(src_idx * 2);     // Lo byte
-        temp_lo[2 * i + 1] = (uint8_t)(src_idx * 2 + 1); // Hi byte
+        temp_lo[2 * i]     = (uint8_t)(src_idx * 2);
+        temp_lo[2 * i + 1] = (uint8_t)(src_idx * 2 + 1);
     }
 
-    // Generisanje maske za gornji deo (druga 32 shorta izlaza)
+    // Generate mask for the upper half of the ZigZag output
     for (i = 32; i < 64; i++) {
         uint8_t src_idx = ZIGZAG_ORDER_REF[i];
         int j = i - 32;
@@ -66,52 +69,45 @@ void init_ZigZag_Masks(void)
         temp_hi[2 * j + 1] = (uint8_t)(src_idx * 2 + 1);
     }
 
+    // Load masks into vector registers
     perm_mask_lo = *((uchar64 *)temp_lo);
     perm_mask_hi = *((uchar64 *)temp_hi);
 }
 
-/* ========================================================================== */
-/* 4x8x8 ZIGZAG IMPLEMENTACIJA                                                */
-/* ========================================================================== */
-/**
- * \brief Performs Zig-Zag on 4 blocks (Macro Block) using Vector Permute.
- * \param src_macro Input: 256 int16_t (Linear Raster Order)
- * \param dst_macro Output: 256 int16_t (ZigZag Order)
- */
-void performZigZagBlock4x8x8(const int16_t * __restrict src_macro, int16_t * __restrict dst_macro)
+
+void performZigZagBlock4x8x8(const int16_t * __restrict src_macro,
+                             int16_t * __restrict dst_macro)
 {
     int k;
 
-    /* * Pointeri se kastuju u short32 (vektor od 64 bajta / 32 shorta).
-     * Svaki 8x8 blok (64 shorta) zauzima TAČNO 2 vektora (short32).
-     */
+    // Cast input and output pointers to vector types
+    // Each short32 vector represents 32 int16 values
+    // One 8x8 block occupies exactly two short32 vectors
     const short32 *input_vec_base = (const short32 *)src_macro;
     short32 *output_vec_base      = (short32 *)dst_macro;
 
-    /* * UNROLL(4): Kompajler će generisati kod koji paralelno obrađuje 4 bloka.
-     * Maske (perm_mask_lo/hi) su već u registrima i koriste se za sve blokove.
-     */
+    // Process four blocks using loop unrolling
+    // Permutation masks are reused for all blocks
     #pragma MUST_ITERATE(4, 4, 4)
     #pragma UNROLL(4)
     for (k = 0; k < 4; k++)
     {
-        // Svaki blok zauzima 2 vektora (k*2)
+        // Compute vector offset for the current block
         int vec_offset = k * 2;
 
-        // 1. UČITAVANJE (2 vektora po bloku = 64 shorta)
-        short32 v_src0_s = input_vec_base[vec_offset + 0]; 
+        // Load two vectors representing one 8x8 block
+        short32 v_src0_s = input_vec_base[vec_offset + 0];
         short32 v_src1_s = input_vec_base[vec_offset + 1];
 
-        // 2. REINTERPRETACIJA (u bajtove za vperm)
+        // Reinterpret short vectors as byte vectors for permutation
         uchar64 v_src0_u = as_uchar64(v_src0_s);
         uchar64 v_src1_u = as_uchar64(v_src1_s);
 
-        // 3. PERMUTACIJA (Srce optimizacije)
-        // Koristimo iste maske za svaki blok! Ovo je ogromna ušteda.
+        // Apply ZigZag permutation using precomputed masks
         uchar64 v_res0_u = __vperm_wrapper(perm_mask_lo, v_src0_u, v_src1_u);
         uchar64 v_res1_u = __vperm_wrapper(perm_mask_hi, v_src0_u, v_src1_u);
 
-        // 4. UPIS
+        // Store permuted result back as short vectors
         output_vec_base[vec_offset + 0] = as_short32(v_res0_u);
         output_vec_base[vec_offset + 1] = as_short32(v_res1_u);
     }
