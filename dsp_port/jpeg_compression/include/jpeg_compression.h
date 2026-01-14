@@ -154,8 +154,8 @@ void quantizeBlock4x8x8(float * __restrict dct_macro_block, int16_t * __restrict
 
 void performZigZagBlock4x8x8(const int16_t * __restrict src_macro, int16_t * __restrict dst_macro);
 
-int32_t performRLEBlock4x8x8(const int16_t *macro_zigzag_buffer, 
-                             RLESymbol *rle_out, 
+int32_t performRLEBlock4x8x8(const int16_t * __restrict macro_zigzag_buffer, 
+                             RLESymbol * __restrict rle_out, 
                              int32_t max_capacity, 
                              int16_t *last_dc_ptr);
 
