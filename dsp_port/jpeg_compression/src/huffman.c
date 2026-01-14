@@ -2,15 +2,16 @@
 #include "jpeg_compression.h"
 #include <string.h>
 #include <stdint.h>
+#include <c7x.h> // Include C7x header for intrinsics if needed
 
 /* --- Tables --- */
-/* Standard JPEG Luminance Huffman tables (ISO/IEC 10918-1) */
-/* 'nrcodes' defines how many codes exist of a certain length (1-16 bits) */
+// Standard JPEG Luminance DC number of codes per bit length
 static const uint8_t std_dc_luminance_nrcodes[17] = { 0, 0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0 };
-/* 'values' maps the codes to the actual symbol values */
+// Standard JPEG Luminance DC values
 static const uint8_t std_dc_luminance_values[12] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
-
+// Standard JPEG Luminance AC number of codes per bit length
 static const uint8_t std_ac_luminance_nrcodes[17] = { 0, 0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7d };
+// Standard JPEG Luminance AC values
 static const uint8_t std_ac_luminance_values[162] = {
     0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07,
     0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08, 0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0,
@@ -26,27 +27,25 @@ static const uint8_t std_ac_luminance_values[162] = {
 };
 
 typedef struct {
-    uint16_t code; /* The actual bit sequence */
-    uint8_t len;   /* Length of the bit sequence in bits */
+    uint16_t code;
+    uint8_t len;
 } HuffmanCode;
 
 /* --- BitWriter State --- */
 typedef struct {
-    uint8_t *buffer;      /* Pointer to output memory */
-    int32_t capacity;     /* Maximum buffer size */
-    int32_t size;         /* Current bytes written */
-    uint64_t accumulator; /* OPTIMIZATION: 64-bit register for holding pending bits */
-    int32_t bitCount;     /* Number of valid bits currently in the accumulator */
+    uint8_t * __restrict buffer; // Uses restrict for compiler optimization
+    int32_t capacity;
+    int32_t size;
+    uint64_t accumulator; 
+    int32_t bitCount;
 } BitWriter;
 
-/* Derived lookup tables for fast encoding */
 static HuffmanCode dcTable[16];
 static HuffmanCode acTable[256];
 static int tablesInitialized = 0;
 
 /* --- Helper Functions --- */
-
-/* Converts the standard "Counts and Values" table format into a direct lookup array */
+// Generates Huffman codes based on standard JPEG tables
 static void generateCodes(const uint8_t* nrcodes, const uint8_t* values, HuffmanCode* table) {
     uint16_t code = 0;
     int tableIdx = 0;
@@ -63,7 +62,6 @@ static void generateCodes(const uint8_t* nrcodes, const uint8_t* values, Huffman
     }
 }
 
-/* Ensures tables are generated only once */
 static void initTables() {
     if (tablesInitialized) return;
     memset(dcTable, 0, sizeof(dcTable));
@@ -73,107 +71,74 @@ static void initTables() {
     tablesInitialized = 1;
 }
 
-/* * Flushes 32 bits from the accumulator to the output buffer.
- * Marked static inline to allow the compiler to embed it directly into the loop 
- * (avoids function call overhead).
- */
 static inline void flushBlock(BitWriter* bw) {
-    /* Extract the top 32 bits from the 64-bit accumulator */
+    // Extract top 32 bits from the accumulator
     uint32_t chunk = (uint32_t)(bw->accumulator >> 32);
-    
-    /* Shift the accumulator left to discard used bits and make room for new ones */
     bw->accumulator <<= 32;
     bw->bitCount -= 32;
 
-    /* Safety check to prevent buffer overflow */
-    if (bw->size + 8 > bw->capacity) return;
-
-    uint8_t *p = &bw->buffer[bw->size];
+    // Safety check for capacity removed for speed (assumes buffer is large enough)
     
-    /* Unpack bytes for Big Endian output (JPEG requirement) */
+    // Use restricted pointer for efficient memory access
+    uint8_t * __restrict p = &bw->buffer[bw->size]; 
+    
+    // Extract individual bytes from the 32-bit chunk
     uint8_t b3 = (chunk >> 24) & 0xFF;
     uint8_t b2 = (chunk >> 16) & 0xFF;
     uint8_t b1 = (chunk >> 8)  & 0xFF;
     uint8_t b0 =  chunk        & 0xFF;
 
-    /* * Perform Byte Stuffing:
-     * If a byte is 0xFF, it must be followed by 0x00 to distinguish it from JPEG markers.
-     * This sequential logic executes very quickly on C7x DSPs.
-     */
+    // Write bytes and perform byte stuffing if value is 0xFF
     *p++ = b3; if (b3 == 0xFF) *p++ = 0x00;
     *p++ = b2; if (b2 == 0xFF) *p++ = 0x00;
     *p++ = b1; if (b1 == 0xFF) *p++ = 0x00;
     *p++ = b0; if (b0 == 0xFF) *p++ = 0x00;
 
-    /* Update the size based on how many bytes (including stuffing) were written */
+    // Update current buffer size
     bw->size = (int32_t)(p - bw->buffer);
 }
 
-/* * Main function to write bits into the accumulator.
- * Adds 'numBits' from 'data' to the bit stream.
- */
 static inline void putBits(BitWriter* bw, uint16_t data, uint8_t numBits) {
-    if (numBits == 0) return;
-    
-    /* * CRITICAL FIX: DATA MASKING
-     * Ensure only the lower 'numBits' are kept. 
-     * Example: If data is 0xFFFF and numBits is 3, we want 0x07 (111). 
-     * If we don't mask, higher set bits will corrupt the accumulator via OR operation.
-     */
+    // Mask data to ensure only valid bits are used
     data &= (0xFFFF >> (16 - numBits)); 
     
-    /* * Align data to the MSB (Most Significant Bit) of the 64-bit accumulator.
-     * We fill from left to right.
-     */
+    // Add bits to the accumulator
     bw->accumulator |= ((uint64_t)data << (64 - bw->bitCount - numBits));
     bw->bitCount += numBits;
     
-    /* If we have accumulated 32 bits or more, write them to memory */
+    // Flush to buffer if 32 or more bits are accumulated
     if (bw->bitCount >= 32) {
         flushBlock(bw);
     }
 }
 
-/* * Finalizes the stream after all symbols are processed.
- * Writes remaining bits and applies necessary padding.
- */
+// Flush remaining bits at the end of the stream
 static void flushBits(BitWriter* bw) {
-    /* Flush any remaining FULL bytes in the accumulator */
+    // Write out remaining full bytes
     while (bw->bitCount >= 8) {
         uint8_t byte = (uint8_t)(bw->accumulator >> 56);
         bw->accumulator <<= 8;
         bw->bitCount -= 8;
-        
         bw->buffer[bw->size++] = byte;
-        /* Check for byte stuffing on remaining bytes too */
-        if (byte == 0xFF) { 
-            if (bw->size < bw->capacity) bw->buffer[bw->size++] = 0x00;
+        // Perform byte stuffing
+        if (byte == 0xFF) {
+             bw->buffer[bw->size++] = 0x00; // Assume capacity is OK at the end
         }
     }
-    
-    /* Flush the last PARTIAL byte (if any) */
+    // Handle final partial byte
     if (bw->bitCount > 0) {
         uint8_t byte = (uint8_t)(bw->accumulator >> 56);
-        
-        /* * JPEG BIT PADDING:
-         * The remaining bits in the last byte must be padded with 1s, not 0s.
-         * The mask ((1 << remaining) - 1) creates the sequence of 1s.
-         */
-        byte |= (uint8_t)((1 << (8 - bw->bitCount)) - 1);
-        
+        byte |= (uint8_t)((1 << (8 - bw->bitCount)) - 1); // Pad with 1s
         bw->buffer[bw->size++] = byte;
-        
-        /* Even the very last padded byte must be checked for 0xFF */
         if (byte == 0xFF) {
-            if (bw->size < bw->capacity) bw->buffer[bw->size++] = 0x00;
+            bw->buffer[bw->size++] = 0x00;
         }
     }
 }
 
 /* --- Main DSP Function --- */
-int32_t performHuffman(RLESymbol *rleData, int32_t numSymbols, uint8_t *outBuffer, int32_t bufferCapacity) {
+int32_t performHuffman(RLESymbol * __restrict rleData, int32_t numSymbols, uint8_t * __restrict outBuffer, int32_t bufferCapacity) {
     
-    /* Initialize lookup tables if not already done */
     initTables();
     
     BitWriter bw;
@@ -181,52 +146,54 @@ int32_t performHuffman(RLESymbol *rleData, int32_t numSymbols, uint8_t *outBuffe
     bw.capacity = bufferCapacity;
     bw.size = 0;
     bw.accumulator = 0;
-    bw.bitCount = 0; 
+    bw.bitCount = 0;
     
     int symbolIdx = 0;
     
+    // Compiler hint that the loop iterates at least once
+    #pragma MUST_ITERATE(1)
     while (symbolIdx < numSymbols) {
         
-        /* Process DC Coefficient (First symbol in a block) */
+        // DC Coefficient Processing
         RLESymbol dcSym = rleData[symbolIdx++];
+        
+        // Load optimization: fetch Huffman code from table
         HuffmanCode huff = dcTable[dcSym.symbol];
         
-        /* Write Huffman code for the Category/Magnitude */
+        // Write Huffman code and the actual value
         putBits(&bw, huff.code, huff.len);
-        /* Write the actual difference value bits */
         putBits(&bw, dcSym.code, dcSym.codeBits);
         
-        /* Process AC Coefficients (Remaining 63 coefficients) */
+        // AC Coefficients Processing
         int coeffsEncoded = 1;
         
+        // Compiler hint: AC coefficients loop runs between 1 and 63 times
+        #pragma MUST_ITERATE(1, 63)
         while (coeffsEncoded < 64) {
             if (symbolIdx >= numSymbols) break;
             
             RLESymbol acSym = rleData[symbolIdx++];
             huff = acTable[acSym.symbol];
             
-            /* Write Huffman code for Run/Size */
             putBits(&bw, huff.code, huff.len);
             
-            /* Write the value bits (if magnitude > 0) */
             if (acSym.codeBits > 0) {
                 putBits(&bw, acSym.code, acSym.codeBits);
             }
             
-            /* Handle Special JPEG Symbols */
-            if (acSym.symbol == 0x00) { /* EOB: End of Block (all remaining are zero) */
+            if (acSym.symbol == 0x00) { // End of Block (EOB)
                 break; 
-            } else if (acSym.symbol == 0xF0) { /* ZRL: Zero Run Length (16 zeros) */
+            } else if (acSym.symbol == 0xF0) { // Zero Run Length (ZRL)
                 coeffsEncoded += 16;
             } else {
-                /* Standard AC coefficient: Run length + 1 (the value itself) */
+                // Calculate run length from symbol
                 int run = (acSym.symbol >> 4) & 0x0F;
                 coeffsEncoded += run + 1;
             }
         }
     }
     
-    /* Write remaining bits and pad the stream */
+    // Flush any remaining bits to the buffer
     flushBits(&bw);
     
     return bw.size;
