@@ -43,116 +43,112 @@ int32_t performRLEBlock4x8x8(const int16_t * __restrict macro_zigzag_buffer,
                              int16_t *last_dc_ptr)
 {
     int32_t total_symbols = 0;
-    int blk, k;
+    int blk, i, k;
     
-    int16_t currentDC, prevDC, diff;
-    uint8_t dcSize;
-    uint16_t dcCode;
-    
-    /* Cache pointers & vars in registers */
+    /* Privremeni buffer za indekse ne-nula elemenata.
+     * Max 64 elementa (najgori slucaj: niko nije nula).
+     * Smjestamo ga na stack (L1 memorija).
+     */
+    int16_t nz_indices[64]; 
+    int nz_count;
+
     const int16_t *current_block_ptr;
-    int lastNonZeroIndex;
-    int zeroCount;
-    int16_t val;
-    uint8_t size;
-    uint16_t code;
     
-    #pragma MUST_ITERATE(4, 4, 4)
+    /* Loop over 4 blocks */
     for (blk = 0; blk < 4; blk++)
     {
         current_block_ptr = macro_zigzag_buffer + (blk * 64);
         
         /* -----------------------------------------------------------
-         * 1. DC COEFF (Always Index 0)
+         * DC COEFF (Uvijek obradjujemo posebno)
          * -----------------------------------------------------------
          */
-        currentDC = current_block_ptr[0];
-        prevDC    = *last_dc_ptr;
-        diff      = currentDC - prevDC;
-        *last_dc_ptr = currentDC;
+        int16_t currentDC = current_block_ptr[0];
+        int16_t diff      = currentDC - *last_dc_ptr;
+        *last_dc_ptr      = currentDC;
 
-        /* Koristimo brze funkcije */
-        dcSize = getBitLength(diff);
-        dcCode = getAmplitudeCode(diff);
-
-        /* Check capacity carefully - branching here is unavoidable but predictable */
         if (total_symbols >= max_capacity) return -1;
         
-        /* Direct write */
+        // DC upis
+        uint8_t dcSize = getBitLength(diff);
         RLESymbol *sym = &rle_out[total_symbols++];
         sym->symbol   = dcSize;
-        sym->code     = dcCode;
+        sym->code     = getAmplitudeCode(diff);
         sym->codeBits = dcSize;
 
         /* -----------------------------------------------------------
-         * 2. FIND LAST NON-ZERO (Optimization)
+         * PASS 1: SCAN & COLLECT INDICES (The Speedup)
+         * Ovu petlju kompajler OBOZAVA. Jednostavna je, nema break-a,
+         * nema while-a. C7000 ce ovdje koristiti vektorske instrukcije
+         * da skenira 64 elementa veoma brzo.
          * -----------------------------------------------------------
          */
-        lastNonZeroIndex = 0;
+        nz_count = 0;
         
-        /* Vector-friendly search: Scan backwards */
-        for (k = 63; k > 0; k--) {
+        // Hint: petlja se vrti max 63 puta.
+        #pragma MUST_ITERATE(0, 63) 
+        for (k = 1; k < 64; k++) {
             if (current_block_ptr[k] != 0) {
-                lastNonZeroIndex = k;
-                break;
+                nz_indices[nz_count++] = k;
             }
         }
 
         /* -----------------------------------------------------------
-         * 3. AC COEFFS (Index 1 .. lastNonZeroIndex)
+         * PASS 2: GENERATE SYMBOLS FROM INDICES
+         * Sada ne iteriramo 63 puta, vec samo onoliko puta koliko
+         * ima ne-nula elemenata (npr. 5-10 puta).
          * -----------------------------------------------------------
          */
-        zeroCount = 0;
+        int last_k = 0; // Pozicija prethodnog ne-nula elementa (ili DC-a)
 
-        /* MUST_ITERATE hints: min=0 (ako je last=0), max=63 */
-        #pragma MUST_ITERATE(0, 63)
-        for (k = 1; k <= lastNonZeroIndex; k++) 
+        // Iteriramo kroz pronadjene indekse
+        for (i = 0; i < nz_count; i++) 
         {
-            val = current_block_ptr[k];
+            int curr_k = nz_indices[i];
+            int16_t val = current_block_ptr[curr_k];
+            
+            // Broj nula izmedju trenutnog i prethodnog
+            int zero_run = curr_k - last_k - 1;
 
-            if (val == 0) {
-                zeroCount++;
-                continue; /* Preskoci ostatak, sto brze na sledecu iteraciju */
+            // Handle ZRL (runs >= 16)
+            // Posto je ovo rijetko, 'if' je bolji od 'while' ovdje,
+            // ali matematicki pristup je najbrzi (bez grananja).
+            if (zero_run >= 16) {
+                int num_zrl = zero_run >> 4; // podijeli sa 16
+                zero_run    = zero_run & 0xF; // ostatak (modulo 16)
+
+                // Emituj ZRL simbole (0xF0)
+                while (num_zrl > 0) {
+                   if (total_symbols >= max_capacity) return -1;
+                   RLESymbol *z = &rle_out[total_symbols++];
+                   z->symbol   = 0xF0;
+                   z->code     = 0;
+                   z->codeBits = 0;
+                   num_zrl--;
+                }
             }
             
-            /* -- NON-ZERO FOUND -- */
-            
-            /* Handle ZRL (Runs > 15) 
-             */
-            while (zeroCount >= 16) {
-                if (total_symbols >= max_capacity) return -1;
-                
-                RLESymbol *zrl = &rle_out[total_symbols++];
-                zrl->symbol   = 0xF0;
-                zrl->code     = 0;
-                zrl->codeBits = 0;
-                zeroCount -= 16;
-            }
-
-            /* Compute Size/Code using FAST intrinsics */
-            size = getBitLength(val);
-            code = getAmplitudeCode(val);
-            
-            /* Combine ZeroRun and Size */
-            // symbolByte = (zeroCount << 4) | size; 
-            
+            // Emituj normalan AC simbol
             if (total_symbols >= max_capacity) return -1;
             
+            uint8_t size = getBitLength(val);
             RLESymbol *ac = &rle_out[total_symbols++];
-            ac->symbol   = (uint8_t)((zeroCount << 4) | size);
-            ac->code     = code;
-            ac->codeBits = size;
             
-            zeroCount = 0;
+            ac->symbol   = (uint8_t)((zero_run << 4) | size);
+            ac->code     = getAmplitudeCode(val);
+            ac->codeBits = size;
+
+            // Azuriraj poziciju za sledeci korak
+            last_k = curr_k;
         }
 
         /* -----------------------------------------------------------
-         * 4. EOB (End of Block)
+         * EOB (End of Block)
+         * Ako je zadnji indeks manji od 63, znaci da su ostalo nule.
          * -----------------------------------------------------------
          */
-        if (lastNonZeroIndex < 63) {
+        if (last_k < 63) {
             if (total_symbols >= max_capacity) return -1;
-            
             RLESymbol *eob = &rle_out[total_symbols++];
             eob->symbol   = 0x00;
             eob->code     = 0;
