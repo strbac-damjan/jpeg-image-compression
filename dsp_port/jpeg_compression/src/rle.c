@@ -3,151 +3,163 @@
 #include <c7x.h> 
 
 /* -------------------------------------------------------------------------------------
- * HELPER FUNCTIONS (Inlined for speed)
+ * HELPER FUNCTIONS 
  * -------------------------------------------------------------------------------------
  */
 
-/**
- * \brief Calculates the number of bits needed to represent a value.
- */
 static inline uint8_t getBitLength(int16_t val) 
 {
-    int16_t absVal;
-    uint8_t bits = 0;
-
     if (val == 0) return 0;
     
-    /* Efficient Absolute Value */
-    absVal = (val < 0) ? -val : val;
-    
-    while (absVal > 0) {
-        bits++;
-        absVal >>= 1;
-    }
-    return bits;
+    /* * __abs(x) -> Absolute value
+     * __norm(x) -> Count Leading Zeros/Ones).
+     */
+    int32_t v32 = (int32_t)__abs(val);
+    return (uint8_t)(32 - __norm(v32) - 1);
 }
 
-/**
- * \brief Calculates the VLI (Variable Length Integer) code.
- */
 static inline uint16_t getAmplitudeCode(int16_t val) 
 {
-    if (val > 0) {
-        return (uint16_t)val;
-    } else {
-        /* JPEG Spec: Negative numbers are stored as (val - 1) */
-        return (uint16_t)(val - 1);
-    }
+    /*
+     * If val < 0, (val >> 15) then -1 (sve jedinice: 0xFFFF).
+     * If val > 0, (val >> 15) then 0  (0x0000).
+     * result = val + (val >> 15).
+     */
+    int16_t mask = val >> 15; 
+    return (uint16_t)(val + mask);
 }
 
 /**
- * \brief Encodes a SINGLE 8x8 Block using RLE.
+ * \brief Encodes a MACROBLOCK (4 blocks of 8x8) using RLE.
+ * * \param macro_zigzag_buffer  Pointer to 256 int16_t elements (4 blocks contiguous).
+ * \param rle_out              Pointer to output buffer.
+ * \param max_capacity         Max remaining space in output buffer.
+ * \param last_dc_ptr          Pointer to global Last DC value (updated sequentially).
+ * \return                     Total symbols written for all 4 blocks (or -1 on error).
  */
-int32_t performRLEBlock(int16_t *block, RLESymbol *rle_out, int32_t max_capacity, int16_t *last_dc_ptr)
+int32_t performRLEBlock4x8x8(const int16_t * __restrict macro_zigzag_buffer, 
+                             RLESymbol * __restrict rle_out, 
+                             int32_t max_capacity, 
+                             int16_t *last_dc_ptr)
 {
-    /* 1. DECLARATIONS (Must be at the top for C89) */
-    int32_t symbol_count = 0;
+    int32_t total_symbols = 0;
+    int blk, k;
+    
     int16_t currentDC, prevDC, diff;
     uint8_t dcSize;
     uint16_t dcCode;
-    int lastNonZeroIndex = 0;
-    int k; /* Loop variable declared here */
-    int zeroCount = 0;
     
-    /* Temp vars for AC loop */
+    /* Cache pointers & vars in registers */
+    const int16_t *current_block_ptr;
+    int lastNonZeroIndex;
+    int zeroCount;
     int16_t val;
     uint8_t size;
     uint16_t code;
-    uint8_t symbolByte;
-
-    /* -----------------------------------------------------------
-     * 2. LOGIC START
-     * -----------------------------------------------------------
-     */
-
-    /* --- Process DC Coefficient (Index 0) --- */
-    currentDC = block[0];
-    prevDC = *last_dc_ptr;
     
-    /* Differential Encoding: Diff = Current - Previous */
-    diff = currentDC - prevDC;
-    
-    /* Update state for the NEXT block */
-    *last_dc_ptr = currentDC;
-
-    /* Encode DC */
-    dcSize = getBitLength(diff);
-    dcCode = getAmplitudeCode(diff);
-
-    /* Write DC Symbol */
-    if (symbol_count >= max_capacity) return -1;
-    rle_out[symbol_count].symbol   = dcSize; /* Run is always 0 for DC */
-    rle_out[symbol_count].code     = dcCode;
-    rle_out[symbol_count].codeBits = dcSize;
-    symbol_count++;
-
-    /* --- Find Last Non-Zero AC Coefficient (Index 1..63) --- */
-    /* Optimization: Scanning backwards allows us to emit EOB early. */
-    
-    /* C89 Loop: k is already declared at top */
-    for (k = 63; k > 0; k--) {
-        if (block[k] != 0) {
-            lastNonZeroIndex = k;
-            break;
-        }
-    }
-
-    /* --- Process AC Coefficients --- */
-    /* Loop only up to the last non-zero element */
-    for (k = 1; k <= lastNonZeroIndex; k++) 
+    #pragma MUST_ITERATE(4, 4, 4)
+    for (blk = 0; blk < 4; blk++)
     {
-        val = block[k];
+        current_block_ptr = macro_zigzag_buffer + (blk * 64);
+        
+        /* -----------------------------------------------------------
+         * 1. DC COEFF (Always Index 0)
+         * -----------------------------------------------------------
+         */
+        currentDC = current_block_ptr[0];
+        prevDC    = *last_dc_ptr;
+        diff      = currentDC - prevDC;
+        *last_dc_ptr = currentDC;
 
-        if (val == 0) {
-            zeroCount++;
-        } else {
-            /* Handle ZRL (Zero Run Length) for runs > 15 */
+        /* Koristimo brze funkcije */
+        dcSize = getBitLength(diff);
+        dcCode = getAmplitudeCode(diff);
+
+        /* Check capacity carefully - branching here is unavoidable but predictable */
+        if (total_symbols >= max_capacity) return -1;
+        
+        /* Direct write */
+        RLESymbol *sym = &rle_out[total_symbols++];
+        sym->symbol   = dcSize;
+        sym->code     = dcCode;
+        sym->codeBits = dcSize;
+
+        /* -----------------------------------------------------------
+         * 2. FIND LAST NON-ZERO (Optimization)
+         * -----------------------------------------------------------
+         */
+        lastNonZeroIndex = 0;
+        
+        /* Vector-friendly search: Scan backwards */
+        for (k = 63; k > 0; k--) {
+            if (current_block_ptr[k] != 0) {
+                lastNonZeroIndex = k;
+                break;
+            }
+        }
+
+        /* -----------------------------------------------------------
+         * 3. AC COEFFS (Index 1 .. lastNonZeroIndex)
+         * -----------------------------------------------------------
+         */
+        zeroCount = 0;
+
+        /* MUST_ITERATE hints: min=0 (ako je last=0), max=63 */
+        #pragma MUST_ITERATE(0, 63)
+        for (k = 1; k <= lastNonZeroIndex; k++) 
+        {
+            val = current_block_ptr[k];
+
+            if (val == 0) {
+                zeroCount++;
+                continue; /* Preskoci ostatak, sto brze na sledecu iteraciju */
+            }
+            
+            /* -- NON-ZERO FOUND -- */
+            
+            /* Handle ZRL (Runs > 15) 
+             */
             while (zeroCount >= 16) {
-                if (symbol_count >= max_capacity) return -1;
+                if (total_symbols >= max_capacity) return -1;
                 
-                /* Symbol 0xF0: Run=15 (0xF), Size=0 */
-                rle_out[symbol_count].symbol   = 0xF0;
-                rle_out[symbol_count].code     = 0;
-                rle_out[symbol_count].codeBits = 0;
-                symbol_count++;
-                
+                RLESymbol *zrl = &rle_out[total_symbols++];
+                zrl->symbol   = 0xF0;
+                zrl->code     = 0;
+                zrl->codeBits = 0;
                 zeroCount -= 16;
             }
 
-            /* Encode Non-Zero AC */
+            /* Compute Size/Code using FAST intrinsics */
             size = getBitLength(val);
             code = getAmplitudeCode(val);
             
-            /* Symbol Byte: High nibble = Run, Low nibble = Size */
-            symbolByte = (uint8_t)((zeroCount << 4) | size);
+            /* Combine ZeroRun and Size */
+            // symbolByte = (zeroCount << 4) | size; 
             
-            if (symbol_count >= max_capacity) return -1;
-            rle_out[symbol_count].symbol   = symbolByte;
-            rle_out[symbol_count].code     = code;
-            rle_out[symbol_count].codeBits = size;
-            symbol_count++;
+            if (total_symbols >= max_capacity) return -1;
             
-            zeroCount = 0; /* Reset run counter */
+            RLESymbol *ac = &rle_out[total_symbols++];
+            ac->symbol   = (uint8_t)((zeroCount << 4) | size);
+            ac->code     = code;
+            ac->codeBits = size;
+            
+            zeroCount = 0;
+        }
+
+        /* -----------------------------------------------------------
+         * 4. EOB (End of Block)
+         * -----------------------------------------------------------
+         */
+        if (lastNonZeroIndex < 63) {
+            if (total_symbols >= max_capacity) return -1;
+            
+            RLESymbol *eob = &rle_out[total_symbols++];
+            eob->symbol   = 0x00;
+            eob->code     = 0;
+            eob->codeBits = 0;
         }
     }
 
-    /* --- Emit EOB (End of Block) --- */
-    /* If the last non-zero index is less than 63, the rest are zeros. */
-    if (lastNonZeroIndex < 63) {
-        if (symbol_count >= max_capacity) return -1;
-        
-        /* Symbol 0x00: Run=0, Size=0 */
-        rle_out[symbol_count].symbol   = 0x00;
-        rle_out[symbol_count].code     = 0;
-        rle_out[symbol_count].codeBits = 0;
-        symbol_count++;
-    }
-
-    return symbol_count;
+    return total_symbols;
 }
 #endif
