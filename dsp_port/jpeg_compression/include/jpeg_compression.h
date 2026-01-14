@@ -14,38 +14,13 @@
 #include <utils/mem/include/app_mem.h>
 #include <c7x.h>
 
-
+#define MACRO_BLOCK_WIDTH 32
+#define BLOCK_SIZE 8
 #define JPEG_COMPRESSION_REMOTE_SERVICE_NAME "com.etfbl.sdos.jpeg_compression"
 
 // -------------------------------------------------------------------------------------
 // ---------------------------STRUCTURE DEFINITIONS-------------------------------------
 // -------------------------------------------------------------------------------------
-typedef struct BMPImage {
-    int32_t width;
-    int32_t height;
-    uint8_t* r;  // Red channel
-    uint8_t* g;  // Green channel
-    uint8_t* b;  // Blue channel
-} BMPImage;
-
-typedef struct {
-    int width;           // Image width
-    int height;          // Image height
-    uint8_t *data;       // Pointer to the pixel array (length = width * height)
-                         // Values 0-255 (where 0=black, 255=white)
-} YImage;
-
-typedef struct {
-    int width;
-    int height;
-    float *coefficients; // Width * Height
-} DCTImage;
-
-typedef struct {
-    int32_t width;
-    int32_t height;
-    int16_t *data; // 16-bit signed integers for quantized values
-} QuantizedImage;
 
 typedef struct {
     uint8_t symbol;    // (Run << 4) | Size
@@ -59,79 +34,110 @@ typedef struct JPEG_COMPRESSION_DTO
     int32_t width;
     int32_t height;
     
-    // Inputs (R, G, B)
+    // Inputs
     uint64_t r_phy_ptr;
     uint64_t g_phy_ptr;
     uint64_t b_phy_ptr;
 
-    // Intermediate
+    // Intermediate buffers
     uint64_t y_phy_ptr;
     uint64_t dct_phy_ptr;
     uint64_t quant_phy_ptr;
     uint64_t zigzag_phy_ptr;
 
-    // RLE Output (Input to Huffman)
+    // Outputs
     uint64_t rle_phy_ptr;
-    uint32_t rle_count; // Number of symbols
+    uint32_t rle_count;
+    uint64_t huff_phy_ptr; 
+    uint32_t huff_size;
 
-    // Huffman Output (Final Bitstream)
-    uint64_t huff_phy_ptr; // NEW
-    uint32_t huff_size;    // NEW: Output size in bytes
-
+    // --- PROFILING DATA (Cycles) ---
+    uint64_t cycles_color_conversion;
+    uint64_t cycles_dct;
+    uint64_t cycles_quantization;
+    uint64_t cycles_zigzag;
+    uint64_t cycles_rle;
+    uint64_t cycles_huffman;
+    uint64_t cycles_total; 
 } JPEG_COMPRESSION_DTO;
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
+
 
 // -------------------------------------------------------------------------------------
 // --------------------------TI SERVICE FUNCTIONS---------------------------------------
 // -------------------------------------------------------------------------------------
 
-// Remote service handler
+// Remote service handler for JPEG compression
+// Casts input parameters to DTO and triggers JPEG conversion
 int32_t JpegCompression_RemoteServiceHandler(char *service_name, uint32_t cmd,
 void *prm, uint32_t prm_size, uint32_t flags);
 
-// Service initialization function
+// Initializes the JPEG compression remote service
+// Registers the service handler with the system
 int32_t JpegCompression_Init();
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
+
 
 // -------------------------------------------------------------------------------------
 // ----------------------- JPEG COMPRESSION FUNCTIONS-----------------------------------
 // -------------------------------------------------------------------------------------
 
 /**
- * \brief Extracts the Luminance (Y) component from RGB data using SIMD vectors.
- * * This function utilizes the C7x vector engine to process 32 pixels simultaneously per iteration.
- * The formula used is standard JPEG conversion: Y = (0.299*R + 0.587*G + 0.114*B).
- * Fixed-point approximation: Y = (77*R + 150*G + 29*B) >> 8.
- *
- * \param img    Pointer to the source BMP image structure (host pointers converted to DSP pointers).
- * \param y_out  Pointer to the destination Y-component structure.
- */
-void extractYComponent(BMPImage *img, YImage *y_out);
-
-
-void computeDCT(YImage *y_img, DCTImage *dct_out);
-
-void quantizeImage(DCTImage *dct_img, QuantizedImage *q_img);
-
-void performZigZag(QuantizedImage *q_img, int16_t *zigzag_out);
-
-int32_t performRLE(int16_t *zigzag_data, int32_t width, int32_t height, RLESymbol *rle_out, int32_t max_capacity);
-
-int32_t performHuffman(RLESymbol *rleData, int32_t numSymbols, uint8_t *outBuffer, int32_t bufferCapacity);
-
-/**
  * \brief Main entry point for the DSP processing task.
- * * Receives the Data Transfer Object (DTO) containing physical addresses from the A72 core,
+ * Receives the Data Transfer Object (DTO) containing physical addresses from the A72 core,
  * maps them to the DSP's local virtual address space, and triggers the conversion.
  */
 int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto);
+
+
+/**
+ * \brief Extracts the Y (luminance) component from RGB input for a 4x8x8 block of pixels
+ */
+void extractYComponentBlock4x8x8(
+    uint8_t * __restrict rComponent,
+    uint8_t * __restrict gComponent,
+    uint8_t * __restrict bComponent,
+    int32_t startX,
+    int32_t startY,
+    int width,
+    int8_t * __restrict outputBuffer);
+
+void init_ZigZag_Masks(void);
+
+/**
+ * \brief Computes DCT for a 32x8 Macro Block.
+ * Handles int8 -> float conversion here.
+ */
+void computeDCTBlock4x8x8(const int8_t * __restrict src_data, float * __restrict dct_out, int32_t stride);
+
+
+/**
+ * \brief Performs quantization for four 8x8 blocks at once
+ * Input contains 256 floats representing four DCT blocks stored linearly
+ * Output contains 256 int16 values after quantization
+ */
+void quantizeBlock4x8x8(float * __restrict dct_macro_block, int16_t * __restrict quant_macro_block);
+
+/**
+ * \brief Performs ZigZag reordering on four 8x8 blocks using vector permute
+ * Input is in linear raster order and output is in ZigZag order
+ */
+void performZigZagBlock4x8x8(const int16_t * __restrict src_macro, int16_t * __restrict dst_macro);
+
+/**
+ * \brief Performs run-length encoding on four ZigZag-ordered 8x8 blocks
+ * Produces JPEG-compliant RLE symbols
+ */
+int32_t performRLEBlock4x8x8(const int16_t * __restrict macro_zigzag_buffer, 
+                             RLESymbol * __restrict rle_out, 
+                             int32_t max_capacity, 
+                             int16_t *last_dc_ptr);
+
+/**
+ * \brief Performs Huffman encoding of RLE symbols into a byte stream
+ */
+int32_t performHuffman(RLESymbol * __restrict rleData, int32_t numSymbols, uint8_t * __restrict outBuffer, int32_t bufferCapacity);
+
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
 #endif
-
 #endif
