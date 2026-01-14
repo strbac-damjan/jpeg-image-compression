@@ -10,15 +10,11 @@
 #define COEFF_G 150
 #define COEFF_B 29
 
-void extractYComponentBlock4x8x8(const BMPImage * __restrict img, int32_t startX, int32_t startY, int8_t * __restrict outputBuffer)
+void extractYComponentBlock4x8x8(const uint8_t * __restrict rComponent, 
+                                const uint8_t * __restrict gComponent, 
+                                const uint8_t * __restrict bComponent, int32_t startX, int32_t startY, int width, int8_t * __restrict outputBuffer)
 {
     int i;
-    int32_t width = img->width;
-    
-    /* Pointers: Dodali smo 'const' (ne mijenjamo ulaz) i 'restrict' (ne preklapaju se) */
-    const uint8_t * __restrict pRowR = img->r + (startY * width + startX);
-    const uint8_t * __restrict pRowG = img->g + (startY * width + startX);
-    const uint8_t * __restrict pRowB = img->b + (startY * width + startX);
     
     int8_t * __restrict pDst = outputBuffer;
 
@@ -35,15 +31,15 @@ void extractYComponentBlock4x8x8(const BMPImage * __restrict img, int32_t startX
     short32 vOffset = (short32)128;
 
     /* Opcionalno: Ako znaš da su pointeri poravnati na 64 bajta (512 bita) */
-    /* _nassert(((uintptr_t)pRowR & 63) == 0); */
+    /* _nassert(((uintptr_t)rComponent & 63) == 0); */
     
     #pragma MUST_ITERATE(8, 8, 8)
     for (i = 0; i < 8; i++)
     {
         /* Učitavanje */
-        vR = *((uchar32 *)pRowR);
-        vG = *((uchar32 *)pRowG);
-        vB = *((uchar32 *)pRowB);
+        vR = *((uchar32 *)rComponent);
+        vG = *((uchar32 *)gComponent);
+        vB = *((uchar32 *)bComponent);
 
         /* Konverzija */
         vR_s = __convert_short32(vR);
@@ -62,9 +58,9 @@ void extractYComponentBlock4x8x8(const BMPImage * __restrict img, int32_t startX
         *((char32 *)pDst) = vY_out;
 
         /* Pointer aritmetika */
-        pRowR += width;
-        pRowG += width;
-        pRowB += width;
+        rComponent += width;
+        gComponent += width;
+        bComponent += width;
         pDst  += 32;
     }
 }

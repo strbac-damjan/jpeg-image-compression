@@ -27,7 +27,6 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO *dto)
      * ---------------------------------------------------------------------
      */
     uint64_t t_start, t_step;
-    BMPImage inputImg;
     RLESymbol *rleBase, *rleCurrent;
     int32_t max_rle_capacity, total_rle_symbols;
     uint8_t *huffData;
@@ -65,12 +64,9 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO *dto)
      * ---------------------------------------------------------------------
      */
     t_start = __TSC;
-
-    inputImg.width = dto->width;
-    inputImg.height = dto->height;
-    inputImg.r = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->r_phy_ptr);
-    inputImg.g = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->g_phy_ptr);
-    inputImg.b = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->b_phy_ptr);
+    uint8_t* r_component = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->r_phy_ptr);
+    uint8_t* g_component = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->g_phy_ptr);
+    uint8_t* b_component = (uint8_t *)(uintptr_t)appMemShared2TargetPtr(dto->b_phy_ptr);
 
     rleBase = (RLESymbol *)(uintptr_t)appMemShared2TargetPtr(dto->rle_phy_ptr);
     rleCurrent = rleBase;
@@ -97,9 +93,12 @@ int32_t convertToJpeg(JPEG_COMPRESSION_DTO *dto)
     {
         for (x = 0; x < dto->width; x += MACRO_BLOCK_WIDTH)
         {
+            uint8_t * current_r = r_component + (y * dto->width + x);
+            uint8_t * current_g = g_component + (y * dto->width + x);
+            uint8_t * current_b = b_component + (y * dto->width + x);
             /* --- A. Color Space Extraction (Macro Block) --- */
             t_step = __TSC;
-            extractYComponentBlock4x8x8(&inputImg, x, y, macro_y_buffer);
+            extractYComponentBlock4x8x8(current_r, current_g, current_b, x, y, dto->width, macro_y_buffer);
             sum_color += (__TSC - t_step);
 
             /* --- B. DCT (Macro Block) --- */

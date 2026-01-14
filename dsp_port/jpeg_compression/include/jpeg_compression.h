@@ -84,12 +84,9 @@ typedef struct JPEG_COMPRESSION_DTO
     uint64_t cycles_zigzag;
     uint64_t cycles_rle;
     uint64_t cycles_huffman;
-    uint64_t cycles_total; // Ukupno vrijeme obrade na DSP-u
-
+    uint64_t cycles_total; 
 } JPEG_COMPRESSION_DTO;
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
+
 
 // -------------------------------------------------------------------------------------
 // --------------------------TI SERVICE FUNCTIONS---------------------------------------
@@ -101,50 +98,24 @@ void *prm, uint32_t prm_size, uint32_t flags);
 
 // Service initialization function
 int32_t JpegCompression_Init();
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
-// -------------------------------------------------------------------------------------
+
 
 // -------------------------------------------------------------------------------------
 // ----------------------- JPEG COMPRESSION FUNCTIONS-----------------------------------
 // -------------------------------------------------------------------------------------
 
 /**
- * \brief Extracts the Luminance (Y) component from RGB data using SIMD vectors.
- * * This function utilizes the C7x vector engine to process 32 pixels simultaneously per iteration.
- * The formula used is standard JPEG conversion: Y = (0.299*R + 0.587*G + 0.114*B).
- * Fixed-point approximation: Y = (77*R + 150*G + 29*B) >> 8.
- *
- * \param img    Pointer to the source BMP image structure (host pointers converted to DSP pointers).
- * \param y_out  Pointer to the destination Y-component structure.
- */
-void extractYComponent(BMPImage *img, YImage *y_out);
-
-
-void computeDCT(YImage *y_img, DCTImage *dct_out);
-
-void quantizeImage(DCTImage *dct_img, QuantizedImage *q_img);
-
-void performZigZag(QuantizedImage *q_img, int16_t *zigzag_out);
-
-int32_t performRLE(int16_t *zigzag_data, int32_t width, int32_t height, RLESymbol *rle_out, int32_t max_capacity);
-
-int32_t performHuffman(RLESymbol *rleData, int32_t numSymbols, uint8_t *outBuffer, int32_t bufferCapacity);
-
-/**
  * \brief Main entry point for the DSP processing task.
- * * Receives the Data Transfer Object (DTO) containing physical addresses from the A72 core,
+ * Receives the Data Transfer Object (DTO) containing physical addresses from the A72 core,
  * maps them to the DSP's local virtual address space, and triggers the conversion.
  */
 int32_t convertToJpeg(JPEG_COMPRESSION_DTO* dto);
 
 
+void extractYComponentBlock4x8x8(const uint8_t * __restrict rComponent, 
+                                 const uint8_t * __restrict gComponent, 
+                                 const uint8_t * __restrict bComponent, int32_t startX, int32_t startY, int width, int8_t * __restrict outputBuffer);
 
-void extractYComponentBlock4x8x8(const BMPImage * __restrict img, int32_t startX, int32_t startY, int8_t * __restrict outputBuffer);
-
-// void computeDCTBlock(int8_t * __restrict src_data, float * __restrict dct_out, int32_t stride);
-
-// void quantizeBlock(float * __restrict dct_block, int16_t * __restrict quant_block);
 
 void init_ZigZag_Masks(void);
 
@@ -159,9 +130,10 @@ int32_t performRLEBlock4x8x8(const int16_t * __restrict macro_zigzag_buffer,
                              int32_t max_capacity, 
                              int16_t *last_dc_ptr);
 
+int32_t performHuffman(RLESymbol * __restrict rleData, int32_t numSymbols, uint8_t * __restrict outBuffer, int32_t bufferCapacity);
+
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------
 #endif
-
 #endif
