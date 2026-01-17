@@ -104,12 +104,6 @@ bool write_eoi(FILE *file);
 
 /**
  * Saves the DSP-generated Huffman bitstream into a valid JFIF (.jpg) file.
- * * @param filename Output file path
- * @param width Image width
- * @param height Image height
- * @param huffmanStream Pointer to the raw bitstream from DSP
- * @param streamSize Size of the bitstream in bytes
- * @return true if successful, false otherwise
  */
 bool saveJPEG(const char* filename, int width, int height, const uint8_t* huffmanStream, uint32_t streamSize);
 

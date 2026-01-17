@@ -6,7 +6,8 @@ TARGET      := app_utils_jpeg_compression
 TARGETTYPE  := library
 
 # Add your source file
-CSOURCES    := jpeg_compression.c color_space.c dct.c quantization.c zigzag.c rle.c huffman.c
+CSOURCES    := jpeg_compression.c color_space.c dct.c quantization.c zigzag.c rle.c huffman.c 
+CPPSOURCES  := streaming_engine.cpp
 
 # Include paths for your headers
 # IDIRS       += $(VISION_APPS_PATH)/utils/jpeg_compression/include

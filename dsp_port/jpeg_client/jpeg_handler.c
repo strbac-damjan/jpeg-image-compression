@@ -204,6 +204,6 @@ bool saveJPEG(const char* filename, int width, int height, const uint8_t* huffma
     write_eoi(file);
 
     fclose(file);
-    printf("JPEG: File '%s' saved successfully (%d bytes)!\n", filename, (int)(ftell(file))); // Note: ftell works if closed? No, removed logic, just print.
+    printf("JPEG: File '%s' saved successfully (%d bytes)!\n", filename, (int)(ftell(file))); 
     return true;
 }
