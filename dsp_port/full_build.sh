@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# 1. CONFIGURATION (PATHS & NETWORK)
+# CONFIGURATION (PATHS & NETWORK)
 # ==========================================
 
 # Network settings
@@ -29,7 +29,7 @@ $SDK_ROOT/vision_apps/out/J721E/A72/LINUX/release/jpeg_client_app.out
 $SDK_ROOT/vision_apps/out/J721E/A72/LINUX/release/jpeg_client_app.out.map"
 
 # ==========================================
-# 2. BUILD PROCESS
+# BUILD PROCESS
 # ==========================================
 
 echo "========================================"
