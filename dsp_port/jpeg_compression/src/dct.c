@@ -28,8 +28,6 @@ __attribute__((aligned(64))) static const float DCT_T_TRANSPOSED[64] = {
 
 /**
  * \brief Standard Matrix Multiplication 8x8 (C = A * B)
- * Ostavljamo skalarnu implementaciju sa pragmama jer je sigurna,
- * ali ovdje bi MMA (Matrix Multiply Accelerator) bio znatno brži.
  */
 static inline void matrixMul8x8(const float * __restrict A, const float * __restrict B, float * __restrict C)
 {
@@ -63,13 +61,13 @@ static void computeDCTBlock(const float * __restrict src_block, float * __restri
     __attribute__((aligned(64))) float result[64];
     int i;
 
-    /* Step A: Temp = Block * T' */
+    // Step A: Temp = Block * T' 
     matrixMul8x8(src_block, DCT_T_TRANSPOSED, temp);
 
-    /* Step B: Result = T * Temp */
+    // Step B: Result = T * Temp 
     matrixMul8x8(DCT_T, temp, result);
 
-    /* Store Result */
+    // Store Result 
     #pragma MUST_ITERATE(64, 64, 64)
     for( i = 0; i < 64; i++)
     {
@@ -77,35 +75,29 @@ static void computeDCTBlock(const float * __restrict src_block, float * __restri
     }
 }
 
-/**
- * GLAVNA FUNKCIJA
- * Uklonjen parametar 'stride' jer su podaci sada linearni blokovi!
- */
 void computeDCTBlock4x8x8(const int8_t * __restrict src_data, float * __restrict dct_out) 
 {
-    // Buffer za trenutni blok. 
+    // Temporary float buffer for a single 8x8 block 
     __attribute__((aligned(64))) float work_block[64];
     
     int k, i;
 
-    // Iteriramo kroz 4 bloka (0, 1, 2, 3)
+    // Process exactly 4 blocks 
     #pragma MUST_ITERATE(4, 4, 4)
     for (k = 0; k < 4; k++)
     {
-        // Računamo pointere za trenutni blok
-        // Kako je y-extrakcija složila blokove linearno, samo pomjeramo za k*64
+        // Pointer to current input and output block 
         const int8_t *current_src = src_data + (k * 64);
         float *current_dst = dct_out + (k * 64);
 
-        // 1. Konverzija int8 -> float
-        // Ovo je sada obična linearna kopija, bez 'stride' skakanja.
+        // Convert int8 input samples to float 
         #pragma MUST_ITERATE(64, 64, 64)
         for(i = 0; i < 64; i++)
         {
             work_block[i] = (float)current_src[i];
         }
 
-        // 2. Izračunaj DCT za ovaj blok
+        // Compute DCT for the current block 
         computeDCTBlock(work_block, current_dst);
     }
 }

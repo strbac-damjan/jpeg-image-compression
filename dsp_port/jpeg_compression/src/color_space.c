@@ -31,7 +31,7 @@ void extractYComponentBlock4x8x8( int8_t * __restrict outputBuffer)
     // Offset used to convert unsigned range to signed range
     short32 vOffset = (short32)128;
 
-    //8 iterations as one block is 2 iterations
+    // 8 iterations as one block is 2 iterations
     #pragma MUST_ITERATE(8, 8, 8)
     for (i = 0; i < 8; i++)
     {

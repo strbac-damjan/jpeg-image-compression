@@ -84,12 +84,21 @@ int32_t JpegCompression_Init();
 extern "C"
 {
 #endif
+    /**
+     * \brief Configures two C7x Streaming Engines for planar RGB access
+     */
     void setupStreamingEngine(uint8_t* r_vec, uint8_t* gb_vec, uint64_t image_length);
+
+    /**
+     * \brief Fetches the next 32 bytes of the rgb components
+     */
     void getNextHalfBlock(short32* r_output, short32* g_output, short32* b_output);
+
+    /**
+     * \brief Closes both streaming engines and releases associated
+     * hardware resources.
+     */
     void closeStreamingEngine();
-    void fetch_next_block(int8_t* y_output);
-    void fetch_setup(uint8_t* r_vec, uint8_t* gb_vec, uint64_t image_length);
-    void fetch_close();
 #ifdef __cplusplus
 }
 #endif

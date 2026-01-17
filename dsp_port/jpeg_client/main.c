@@ -94,46 +94,6 @@ void format_cycles(uint64_t num, char *out_buf)
     out_buf[j] = '\0';
 }
 
-void printFirstBlock(BMPImage *img)
-{
-    int w = img->width; // Treba nam širina slike da bi znali kad počinje novi red u memoriji
-    printf("---------------------------------------");
-        // --- R KOMPONENTA ---
-        printf("--- R Component (First 8x8 Block) ---\n");
-    for (int y = 0; y < 8; y++)
-    {
-        for (int x = 0; x < 8; x++)
-        {
-            // Indeks u linearnom nizu je: (trenutni_red * ukupna_širina) + trenutna_kolona
-            printf("%3d ", img->r[y * w + x]);
-        }
-        printf("\n"); // Novi red nakon svakih 8 piksela
-    }
-
-    // --- G KOMPONENTA ---
-    printf("\n--- G Component (First 8x8 Block) ---\n");
-    for (int y = 0; y < 8; y++)
-    {
-        for (int x = 0; x < 8; x++)
-        {
-            printf("%3d ", img->g[y * w + x]);
-        }
-        printf("\n");
-    }
-
-    // --- B KOMPONENTA ---
-    printf("\n--- B Component (First 8x8 Block) ---\n");
-    for (int y = 0; y < 8; y++)
-    {
-        for (int x = 0; x < 8; x++)
-        {
-            printf("%3d ", img->b[y * w + x]);
-        }
-        printf("\n");
-    }
-    printf("---------------------------------------");
-}
-
 // Prints profiling statistics returned from the DSP
 void print_profiling_stats(JPEG_COMPRESSION_DTO *dto)
 {
@@ -210,9 +170,7 @@ void print_usage(const char *prog_name)
 }
 
 /**
- * Popunjava pre-alocirane buffere podacima iz BMP slike.
- * dst_r: mora biti velicine (blocks_w * blocks_h * 64) bajtova
- * dst_gb: mora biti velicine (blocks_w * blocks_h * 64 * 2) bajtova
+ * Extracts pixel data from a BMP image into linearized 8x8 blocks.
  */
 void bmp_extract_linear_blocks(const BMPImage *img,
                                uint8_t *blk_r,
@@ -221,40 +179,40 @@ void bmp_extract_linear_blocks(const BMPImage *img,
                                uint32_t *out_w,
                                uint32_t *out_h)
 {
-
-    uint32_t blocks_w = (img->width + 7) / 8;
+    /* Number of 8x8 blocks in each dimension */
+    uint32_t blocks_w = (img->width  + 7) / 8;
     uint32_t blocks_h = (img->height + 7) / 8;
 
     *out_w = blocks_w;
     *out_h = blocks_h;
 
-    uint32_t idx = 0; // Linearni indeks za izlazne buffere
+    /* Linear index over all output blocks */
+    uint32_t idx = 0;
 
+    /* Iterate over blocks in raster order */
     for (uint32_t by = 0; by < blocks_h; by++)
     {
         for (uint32_t bx = 0; bx < blocks_w; bx++)
         {
-
-            // Unutar 8x8 bloka
+            /* Iterate inside a single 8x8 block */
             for (uint32_t y = 0; y < 8; y++)
             {
                 for (uint32_t x = 0; x < 8; x++)
                 {
-
-                    // Računanje stvarne pozicije na slici
+                    /* Compute corresponding image coordinates */
                     int32_t img_x = bx * 8 + x;
                     int32_t img_y = by * 8 + y;
 
-                    // Clamping (ako smo van granica slike, uzmi zadnji piksel)
+                    /* Clamp coordinates at image borders */
                     if (img_x >= img->width)
                         img_x = img->width - 1;
                     if (img_y >= img->height)
                         img_y = img->height - 1;
 
-                    // Indeks u originalnoj BMP slici
+                    /* Linear index in the source image */
                     int32_t src_idx = img_y * img->width + img_x;
 
-                    // Kopiranje u linearne blok buffere
+                    /* Store pixel components in block-linear layout */
                     blk_r[idx] = img->r[src_idx];
                     blk_g[idx] = img->g[src_idx];
                     blk_b[idx] = img->b[src_idx];
@@ -266,8 +224,13 @@ void bmp_extract_linear_blocks(const BMPImage *img,
     }
 }
 
-// Funkcija 2: Formira finalne R i GB pointere iz pripremljenih blokova
-// block_size_bytes obično odgovara ukupnom broju piksela (blocks_w * blocks_h * 64)
+
+/* 
+ * Forms the final planar input format expected by the DSP:
+ *   - R channel: copied as-is (already block-linear).
+ *   - G and B channels: interleaved into a single buffer,
+ *     32 bits G samples followed by 32 bytes of B samples
+ */
 void interleave_gb_channels(const uint8_t *in_blk_r,
                             const uint8_t *in_blk_g,
                             const uint8_t *in_blk_b,
@@ -275,40 +238,37 @@ void interleave_gb_channels(const uint8_t *in_blk_r,
                             uint8_t *out_ptr_r,
                             uint8_t *out_ptr_gb)
 {
-
-    // 1. R kanal se samo kopira (jer je već linearizovan po blokovima u prvoj funkciji)
-    // Možeš koristiti memcpy za maksimalnu brzinu
+    // R channel is already in the required linear block format
     memcpy(out_ptr_r, in_blk_r, total_pixels);
 
-    // 2. G i B kanali se isprepliću (interleave)
-    // Logika: 32 bajta G, pa 32 bajta B
-    // i iterira kroz ulazne nizove (koji su iste dužine)
-    // k iterira kroz izlazni gb niz (koji je duplo veći)
-
+    // Interleave G and B channels in chunks of 32 pixels
     for (uint32_t i = 0, k = 0; i < total_pixels; i += 32, k += 64)
     {
         for (int j = 0; j < 32; j++)
         {
-            // Prvih 32 bajta u izlaznom bloku su G
+            // First half: G samples
             out_ptr_gb[k + j] = in_blk_g[i + j];
 
-            // Narednih 32 bajta su B
+            // Second half: B samples
             out_ptr_gb[k + j + 32] = in_blk_b[i + j];
         }
     }
 }
 
+/* 
+ * Helper function that prepares image data for the DSP
+ * JPEG pipeline. Prepares the RGB data to be consumed
+ * directly by the C7x Streaming Engines
+ */
 void fill_planar_blocks(const BMPImage *img,
                         uint8_t *dst_r,
                         uint8_t *dst_gb,
                         uint32_t blocks_w,
                         uint32_t blocks_h)
 {
-
     uint32_t total_pixels = blocks_w * blocks_h * 64;
 
-    // 1. Alokacija privremenih buffera za linearne blokove
-    // Ovi bufferi služe samo za tranziciju podataka
+    // Temporary buffers used only for data reorganization 
     uint8_t *temp_r = (uint8_t *)malloc(total_pixels);
     uint8_t *temp_g = (uint8_t *)malloc(total_pixels);
     uint8_t *temp_b = (uint8_t *)malloc(total_pixels);
@@ -316,27 +276,28 @@ void fill_planar_blocks(const BMPImage *img,
     if (!temp_r || !temp_g || !temp_b)
     {
         printf("Error: Failed to allocate temp buffers in fill_planar_blocks\n");
-        if (temp_r)
-            free(temp_r);
-        if (temp_g)
-            free(temp_g);
-        if (temp_b)
-            free(temp_b);
+        if (temp_r) free(temp_r);
+        if (temp_g) free(temp_g);
+        if (temp_b) free(temp_b);
         return;
     }
 
-    // 2. Ekstrakcija podataka iz BMP-a u linearne 8x8 blokove
+    // Extract BMP pixels into block-linear buffers 
     uint32_t dummy_w, dummy_h;
-    bmp_extract_linear_blocks(img, temp_r, temp_g, temp_b, &dummy_w, &dummy_h);
+    bmp_extract_linear_blocks(img, temp_r, temp_g, temp_b,
+                              &dummy_w, &dummy_h);
 
-    // 3. Permutacija i spajanje u finalni format za DSP (R + Interleaved GB)
-    interleave_gb_channels(temp_r, temp_g, temp_b, total_pixels, dst_r, dst_gb);
+    // Convert into final R + interleaved GB format 
+    interleave_gb_channels(temp_r, temp_g, temp_b,
+                           total_pixels, dst_r, dst_gb);
 
-    // 4. Čišćenje
+    // Release temporary buffers 
     free(temp_r);
     free(temp_g);
     free(temp_b);
 }
+
+
 int main(int argc, char *argv[])
 {
     int32_t status;
