@@ -60,6 +60,45 @@ typedef struct JPEG_COMPRESSION_DTO
 
 } JPEG_COMPRESSION_DTO;
 
+void print_first_block(BMPImage *img) 
+{
+    int w = img->width; // Treba nam širina slike da bi znali kad počinje novi red u memoriji
+
+    // --- R KOMPONENTA ---
+    printf("--- R Component (First 8x8 Block) ---\n");
+    for(int y = 0; y < 8; y++) 
+    {
+        for(int x = 0; x < 8; x++)
+        {
+            // Indeks u linearnom nizu je: (trenutni_red * ukupna_širina) + trenutna_kolona
+            printf("%3d ", img->r[y * w + x]); 
+        }
+        printf("\n"); // Novi red nakon svakih 8 piksela
+    }
+
+    // --- G KOMPONENTA ---
+    printf("\n--- G Component (First 8x8 Block) ---\n");
+    for(int y = 0; y < 8; y++) 
+    {
+        for(int x = 0; x < 8; x++)
+        {
+            printf("%3d ", img->g[y * w + x]);
+        }
+        printf("\n");
+    }
+
+    // --- B KOMPONENTA ---
+    printf("\n--- B Component (First 8x8 Block) ---\n");
+    for(int y = 0; y < 8; y++) 
+    {
+        for(int x = 0; x < 8; x++)
+        {
+            printf("%3d ", img->b[y * w + x]);
+        }
+        printf("\n");
+    }
+}
+
 // Aligns a value to the next multiple of 32
 // Used for macro block width alignment
 int32_t align32(int32_t x)
@@ -353,12 +392,12 @@ int main(int argc, char *argv[])
         appDeInit();
         return 1;
     }
+    print_first_block(img);
 
     // --- 4. Compute Block Dimensions ---
     uint32_t blocks_w = (img->width + 7) / 8;
     uint32_t blocks_h = (img->height + 7) / 8;
 
-    // Ukupan broj piksela poravnat na blokove (npr. 800x600 -> 800x600, ali 801x600 -> 808x600)
     uint32_t total_pixels_aligned = blocks_w * blocks_h * 64;
 
     appLogPrintf("JPEG: Loaded %dx%d -> Blocks %dx%d (Total Padded Pixels: %d)\n",
@@ -366,10 +405,8 @@ int main(int argc, char *argv[])
 
     // --- 5. Allocate Input Buffers (Shared Memory DDR) ---
 
-    // R kanal: 1 bajt po pikselu
     uint8_t *r_input_virt = (uint8_t *)appMemAlloc(APP_MEM_HEAP_DDR, total_pixels_aligned, 64);
 
-    // GB kanal: 2 bajta po pikselu (spojeni G i B, interleaved)
     uint32_t gb_size_bytes = total_pixels_aligned * 2;
     uint8_t *gb_input_virt = (uint8_t *)appMemAlloc(APP_MEM_HEAP_DDR, gb_size_bytes, 64);
 
@@ -377,17 +414,15 @@ int main(int argc, char *argv[])
     {
         appLogPrintf("JPEG: Failed to allocate input buffers!\n");
         freeBMPImage(img);
-        appDeInit(); // Pretpostavljam da ovo čisti i preostale alokacije ako appMemAlloc fail-a
+        appDeInit();
         return 1;
     }
 
     // --- 6. Convert BMP to Planar/Block Format ---
-    // Koristimo wrapper funkciju definisanu iznad
     appLogPrintf("JPEG: Converting format and interleaving blocks...\n");
     fill_planar_blocks(img, r_input_virt, gb_input_virt, blocks_w, blocks_h);
 
-    // --- 7. Flush Cache (CRITICAL) ---
-    // Upisujemo pripremljene podatke iz L2/L3 cache-a u DDR da ih DSP vidi
+    // --- 7. Flush Cache ---
     appMemCacheWb(r_input_virt, total_pixels_aligned);
     appMemCacheWb(gb_input_virt, gb_size_bytes);
 
@@ -407,7 +442,7 @@ int main(int argc, char *argv[])
     int16_t *zigzag_output_virt = (int16_t *)appMemAlloc(APP_MEM_HEAP_DDR, quant_size_bytes, 64);
 
     // RLE output
-    uint32_t rle_size_bytes = total_pixels_aligned * sizeof(RLESymbol); // Pretpostavka za sizeof(RLESymbol)
+    uint32_t rle_size_bytes = total_pixels_aligned * sizeof(RLESymbol);
     RLESymbol *rle_output_virt = (RLESymbol *)appMemAlloc(APP_MEM_HEAP_DDR, rle_size_bytes, 64);
 
     // Huffman bitstream output
@@ -418,17 +453,13 @@ int main(int argc, char *argv[])
         !zigzag_output_virt || !rle_output_virt || !huff_output_virt)
     {
         appLogPrintf("JPEG: Failed to allocate output memory!\n");
-        // Ovdje bi trebalo dodati free() za r_input i gb_input
         freeBMPImage(img);
         appDeInit();
         return 1;
     }
 
-    // Inicijalizacija outputa na 0 (dobra praksa)
     memset(y_output_virt, 0, total_pixels_aligned);
     appMemCacheWb(y_output_virt, total_pixels_aligned);
-    // Napomena: Za ostale output buffere writeback nije nužan jer ih samo čitamo,
-    // ali Invalidate je obavezan poslije DSP-a.
 
     // --- 9. Prepare DTO ---
     JPEG_COMPRESSION_DTO dto;
@@ -437,13 +468,8 @@ int main(int argc, char *argv[])
     dto.width = blocks_w * 8;
     dto.height = blocks_h * 8;
 
-    // -- Konverzija Virtualnih adresa u Fizičke (za DSP DMA) --
     dto.r_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)r_input_virt, APP_MEM_HEAP_DDR);
-
-    // BITNO: gb_phy_ptr pokazuje na početak interleavovanog buffera.
-    // DSP kod mora znati da ovaj pointer sadrži i G i B podatke.
     dto.gb_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)gb_input_virt, APP_MEM_HEAP_DDR);
-
     dto.y_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)y_output_virt, APP_MEM_HEAP_DDR);
     dto.dct_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)dct_output_virt, APP_MEM_HEAP_DDR);
     dto.quant_phy_ptr = appMemGetVirt2PhyBufPtr((uint64_t)quant_output_virt, APP_MEM_HEAP_DDR);
@@ -470,17 +496,15 @@ int main(int argc, char *argv[])
     else
     {
 
-        // --- INVALIDATE CACHE (Da CPU pročita nove podatke iz DDR-a) ---
-        // Moramo invalidirati cache za sve output buffere koje želimo čitati
         appMemCacheInv(y_output_virt, total_pixels_aligned);
+        appMemCacheInv(dct_output_virt, total_pixels_aligned);
+        appMemCacheInv(quant_output_virt, total_pixels_aligned);
+        appMemCacheInv(zigzag_output_virt, total_pixels_aligned);
         appMemCacheInv(huff_output_virt, dto.huff_size);
-        // appMemCacheInv(dct_output_virt, dct_size_bytes); // Ako trebaš debug ispis DCT-a
 
         appLogPrintf("\n=== RESULT ===\n");
         appLogPrintf("JPEG: Final Huffman Size: %d bytes\n", dto.huff_size);
 
-        // Snimanje kompresovanog fajla
-        // Koristimo originalne dimenzije ili alignovane, zavisno od saveJPEG implementacije
         bool saved = saveJPEG(outputPath, dto.width, dto.height, huff_output_virt, dto.huff_size);
 
         if (saved)
@@ -492,10 +516,16 @@ int main(int argc, char *argv[])
             appLogPrintf("ERROR: Failed to write output file!\n");
         }
 
-        // Opcionalno: Debug ispis prvog bloka Y komponente
-        // print_debug_block("Y component (first block)", y_output_virt, 0);
+        print_debug_block("Y component (first block)", y_output_virt, 0);
 
-        // Opcionalno: Profiling stats iz DTO (ako ih DSP popunjava)
+        print_debug_block("DCT componetn (first block)", dct_output_virt, 1);
+
+        print_debug_block("Quanitzation ouptput (first block)", quant_output_virt, 2);
+
+        print_debug_block("Zig zag output (first block)", zigzag_output_virt, 2);
+
+        
+
         print_profiling_stats(&dto);
     }
 
