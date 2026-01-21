@@ -33,6 +33,7 @@ Here is an overview of the repository organization and the purpose of each direc
 
 ## How to run the DSP version
 
+### Setting up the SDK
 1. Download ti-processor-sdk-rtos-j721e-evm-09_02_00_05
 2. Update the file `vision_apps/Makefile` to include:
 ```
@@ -105,8 +106,14 @@ int32_t appInit()
 5. Update the `vision_apps/platform/j721e/rtos/concerto_c7x_inc.mak` to include:
 `STATIC_LIBS += app_utils_jpeg_compression`
 
-7. Connect to the board then run the `dsp_port/full_build.sh` script to transfer the binaries to the board
+### Run the full build
+1. Run the `dsp_port/full_build.sh` script to build all binaries for the board
 
-8. Run `ssh root@192.168.1.200` to connect to the board, then go to `/opt/vision_apps/`
+2. Connect to the board then run the `dsp_port/transfer_binaries.sh` script to transfer the binaries to the board
 
-9. Run `./jpeg_client_app.out` to start the program.
+3. Run `ssh root@192.168.1.200` to connect to the board, then go to `/opt/vision_apps/`
+
+4. Run `./jpeg_client_app.out` to start the program.
+
+### Generate the assembly files
+Run the `dsp_port/debug_build.sh` script to generate .asm files in `dsp_port/debug_build`
