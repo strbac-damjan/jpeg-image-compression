@@ -8,23 +8,27 @@ Here is an overview of the repository organization and the purpose of each direc
 
 ```text
 .
-├── assets
-│   ├── input
-│   └── output
-├── dsp_port
-│   └── jpeg_compression
-│       ├── include
-│       └── src
+├── analyze_results.py             # Python script to verify/compare image quality
+├── assets                         # Test resources and output artifacts
+│   ├── difference                 # Generated images showing visual differences (diffs)
+│   ├── input                      # Source BMP images for testing
+│   └── output                     # Generated JPEG results
+├── dsp_port                       # Implementation ported/optimized for DSP hardware
+│   ├── debug_build.sh             # Compiles the DSP code with debug flags
+│   ├── flash_binaries.sh          # Flashes the compiled binary to the hardware
+│   ├── full_build.sh              # Compiles the complete DSP project
+│   ├── jpeg_client                # Application layer calling the library on DSP
+│   └── jpeg_compression           # Core compression library for DSP
+│       ├── include                # DSP-specific header files
+│       └── src                    # DSP-specific source code
 ├── LICENSE
-├── natural_c
-│   ├── build
-│   ├── include
-│   ├── Makefile
-│   └── src
-│       ├── core
-│       ├── io
-│       └── main.c
-└── README.md
+├── natural_c                      # Reference implementation in standard C (PC version)
+│   ├── include                    # Header files for the reference model
+│   └── src                        # Source code for the reference model
+│       ├── core                   # Core algorithmic logic (DCT, Huffman, etc.)
+│       └── io                     # Input/Output file handling
+├── README.md
+└── run_analysis.sh                # script to execute the analysis pipeline
 ```
 
 ## How to run natural C version
